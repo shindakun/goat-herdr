@@ -162,7 +162,7 @@ The daemon dies with the Herdr server. Startup hooks run again on a new server, 
 ## Milestones
 
 1. Done. Scaffold, `notify` with the stdout sink, hook verified in a real Herdr, fixtures captured under `tests/fixtures/`.
-2. Telegram sink without topics, ntfy sink, `test` sends to every sink, `toggle` pauses, debounce, tail on blocked alerts. ntfy is verified end to end. Telegram is unverified against the live API; the milestone stays open until a real message arrives.
+2. Done. Telegram sink without topics, ntfy sink, `test` sends to every sink, `toggle` pauses, debounce, tail on blocked alerts. Both sinks verified with a real blocked event and the message read back.
 3. Topics. Lazy create, state cache, close on pane exit.
 4. Bridge. Reply, `/tail`, inline keyboard.
 5. Slack webhook sink.
