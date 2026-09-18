@@ -2,7 +2,7 @@
 
 A [Herdr](https://herdr.dev) plugin that alerts you when an agent needs you. Telegram and ntfy, with a seam for more.
 
-Status: alerts work. Telegram (one chat, no topics yet) and ntfy. Two-way bridge and Telegram topics are next. See [docs/PLAN.md](docs/PLAN.md).
+Status: alerts work. Telegram with forum topics, and ntfy. The two-way bridge is next. See [docs/PLAN.md](docs/PLAN.md).
 
 ## Install
 
@@ -40,6 +40,7 @@ host_label = "mac-mini"          # default: hostname
 type = "telegram"
 bot_token_env = "TELEGRAM_BOT_TOKEN"   # or bot_token = "123:abc"
 chat_id = -1001234567890
+topics = "per-agent"                   # none | per-agent | per-workspace
 
 [[sinks]]
 type = "ntfy"
@@ -54,6 +55,8 @@ TELEGRAM_BOT_TOKEN=123456:abc...
 ```
 
 Telegram setup: create a bot with @BotFather, start a chat with it (or add it to a group), then get the chat id from `https://api.telegram.org/bot<token>/getUpdates` after sending it a message.
+
+Topics need a supergroup with Topics turned on and the bot as an admin with Manage Topics. `per-agent` gives one topic per host, workspace, and agent (`claude · goat-herdr · mac-mini`); `per-workspace` one per host and workspace. The plugin creates topics as agents first alert, closes a topic when its last pane closes, and reopens it when the agent comes back. `none` posts everything to the chat root.
 
 Every alert leads with host, workspace, and agent, so one chat can carry several machines:
 

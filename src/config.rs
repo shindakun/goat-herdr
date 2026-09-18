@@ -66,9 +66,25 @@ pub struct TelegramConfig {
     #[serde(default)]
     pub bot_token_env: Option<String>,
     pub chat_id: i64,
+    /// Forum topic routing. Needs a supergroup with Topics on and the bot as
+    /// an admin with Manage Topics.
+    #[serde(default)]
+    pub topics: TopicMode,
     /// Override for tests and self-hosted Bot API servers.
     #[serde(default = "default_telegram_api")]
     pub api_url: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TopicMode {
+    /// Everything in the chat root.
+    #[default]
+    None,
+    /// One topic per host, workspace, and agent.
+    PerAgent,
+    /// One topic per host and workspace.
+    PerWorkspace,
 }
 
 #[derive(Debug, Deserialize)]
@@ -200,6 +216,7 @@ type = "stdout"
 type = "telegram"
 bot_token_env = "TELEGRAM_BOT_TOKEN"
 chat_id = -1001234567890
+topics = "per-agent"
 
 [[sinks]]
 type = "ntfy"
@@ -212,6 +229,7 @@ url = "https://ntfy.sh/goats"
         match &config.sinks[1] {
             SinkConfig::Telegram(t) => {
                 assert_eq!(t.chat_id, -1001234567890);
+                assert_eq!(t.topics, TopicMode::PerAgent);
                 assert_eq!(t.api_url, "https://api.telegram.org");
             }
             other => panic!("expected telegram, got {other:?}"),

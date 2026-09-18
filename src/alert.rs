@@ -115,6 +115,23 @@ impl Alert {
         }
     }
 
+    /// Workspace name without Herdr's `[n] ` ordinal, which changes when
+    /// workspaces reorder and must not split one project across topics.
+    pub fn workspace_name(&self) -> &str {
+        let label = self.workspace.as_str();
+        let Some(rest) = label.strip_prefix('[') else {
+            return label;
+        };
+        match rest.split_once("] ") {
+            Some((ordinal, name))
+                if !ordinal.is_empty() && ordinal.bytes().all(|b| b.is_ascii_digit()) =>
+            {
+                name
+            }
+            _ => label,
+        }
+    }
+
     /// The first line of every rendered alert: status, agent, workspace, host.
     pub fn headline(&self) -> String {
         format!(
@@ -153,6 +170,17 @@ mod tests {
         assert_eq!(alert.workspace, "[1] goat-herdr");
         assert_eq!(alert.pane_id, "w3:pD");
         assert_eq!(alert.headline(), "BLOCKED claude · [1] goat-herdr · box");
+    }
+
+    #[test]
+    fn workspace_name_drops_the_ordinal() {
+        let mut a = Alert::test(&config());
+        a.workspace = "[12] goat-herdr".into();
+        assert_eq!(a.workspace_name(), "goat-herdr");
+        a.workspace = "[x] not an ordinal".into();
+        assert_eq!(a.workspace_name(), "[x] not an ordinal");
+        a.workspace = "plain".into();
+        assert_eq!(a.workspace_name(), "plain");
     }
 
     #[test]

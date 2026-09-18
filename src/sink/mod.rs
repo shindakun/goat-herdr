@@ -5,8 +5,11 @@ mod ntfy;
 mod stdout;
 mod telegram;
 
+use std::path::Path;
+
 use crate::alert::Alert;
 use crate::config::{Config, SinkConfig};
+use crate::state::State;
 
 pub trait Sink {
     fn name(&self) -> &str;
@@ -23,7 +26,7 @@ pub enum Delivery {
 
 /// Instantiates every configured sink. With no sinks configured, alerts go to
 /// stdout so the plugin log shows what would have been sent.
-pub fn build(config: &Config) -> Result<Vec<Box<dyn Sink>>, String> {
+pub fn build(config: &Config, state_dir: &Path) -> Result<Vec<Box<dyn Sink>>, String> {
     if config.sinks.is_empty() {
         return Ok(vec![Box::new(stdout::Stdout)]);
     }
@@ -33,7 +36,11 @@ pub fn build(config: &Config) -> Result<Vec<Box<dyn Sink>>, String> {
         .map(|entry| -> Result<Box<dyn Sink>, String> {
             match entry {
                 SinkConfig::Stdout => Ok(Box::new(stdout::Stdout)),
-                SinkConfig::Telegram(cfg) => Ok(Box::new(telegram::Telegram::new(cfg, config)?)),
+                SinkConfig::Telegram(cfg) => Ok(Box::new(telegram::Telegram::new(
+                    cfg,
+                    config,
+                    State::new(state_dir),
+                )?)),
                 SinkConfig::Ntfy(cfg) => Ok(Box::new(ntfy::Ntfy::new(cfg, config)?)),
             }
         })

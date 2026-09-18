@@ -72,20 +72,22 @@ fn notify() -> Result<(), String> {
         }
         if alert.status == Status::Blocked && config.alerts.tail_lines > 0 {
             // A tail is nice to have; the alert still goes out without it.
+            let started = std::time::Instant::now();
             match env.read_tail(&alert.pane_id, config.alerts.tail_lines) {
                 Ok(tail) => alert.tail = Some(tail),
                 Err(err) => eprintln!("goat-herdr: {err}"),
             }
+            println!("tail: {}ms", started.elapsed().as_millis());
         }
     }
-    deliver(&config, &alert)
+    deliver(&config, &env, &alert)
 }
 
 /// Action entry point. Sends a fixed alert so the user can confirm the wiring.
 fn test() -> Result<(), String> {
     let env = PluginEnv::from_env()?;
     let config = Config::load(&env)?;
-    deliver(&config, &Alert::test(&config))
+    deliver(&config, &env, &Alert::test(&config))
 }
 
 /// Action entry point. Pauses or resumes alerts.
@@ -99,14 +101,19 @@ fn toggle() -> Result<(), String> {
     Ok(())
 }
 
-fn deliver(config: &Config, alert: &Alert) -> Result<(), String> {
-    let sinks = sink::build(config)?;
+fn deliver(config: &Config, env: &PluginEnv, alert: &Alert) -> Result<(), String> {
+    let sinks = sink::build(config, &env.state_dir)?;
     let mut failures = Vec::new();
     for sink in &sinks {
-        match sink.send(alert) {
-            Ok(sink::Delivery::Sent) => println!("{}: sent {}", sink.name(), alert.headline()),
+        let started = std::time::Instant::now();
+        let outcome = sink.send(alert);
+        let ms = started.elapsed().as_millis();
+        match outcome {
+            Ok(sink::Delivery::Sent) => {
+                println!("{}: sent {} ({ms}ms)", sink.name(), alert.headline())
+            }
             Ok(sink::Delivery::Skipped) => {}
-            Err(err) => failures.push(format!("{}: {err}", sink.name())),
+            Err(err) => failures.push(format!("{}: {err} ({ms}ms)", sink.name())),
         }
     }
     if failures.is_empty() {

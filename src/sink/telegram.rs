@@ -1,13 +1,18 @@
-//! Telegram Bot API `sendMessage`. HTML parse mode; agent output goes in a
-//! `<pre>` block. Forum topics come in the next milestone.
+//! Telegram Bot API. `sendMessage` in HTML parse mode with agent output in a
+//! `<pre>` block. With topics on, each alert goes to a forum topic named for
+//! its agent, workspace, and host; topics are created on first use, closed
+//! when the last pane behind them closes, and reopened when one returns.
 
 use crate::alert::{Alert, Status};
-use crate::config::{Config, TelegramConfig};
+use crate::config::{Config, TelegramConfig, TopicMode};
 use crate::http::Client;
 use crate::sink::{Delivery, Sink};
+use crate::state::State;
 
 /// Telegram's hard limit on message text.
 const MAX_TEXT: usize = 4096;
+/// Telegram's limit on a forum topic name.
+const MAX_TOPIC_NAME: usize = 128;
 /// Longest 429 back-off honored before giving up.
 const MAX_RETRY_AFTER_SECS: u64 = 30;
 
@@ -15,11 +20,42 @@ pub struct Telegram {
     api_url: String,
     token: String,
     chat_id: i64,
+    topics: TopicMode,
+    state: State,
     client: Client,
 }
 
+/// An API call that failed, with the error text Telegram returned so the
+/// caller can react to topic state.
+struct ApiError {
+    method: String,
+    status: u16,
+    description: String,
+}
+
+impl ApiError {
+    fn topic_closed(&self) -> bool {
+        self.description.contains("TOPIC_CLOSED")
+    }
+
+    fn thread_missing(&self) -> bool {
+        // "Bad Request: message thread not found" after a topic is deleted.
+        self.description.contains("thread not found")
+    }
+}
+
+impl std::fmt::Display for ApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "telegram {} {}: {}",
+            self.method, self.status, self.description
+        )
+    }
+}
+
 impl Telegram {
-    pub fn new(cfg: &TelegramConfig, config: &Config) -> Result<Self, String> {
+    pub fn new(cfg: &TelegramConfig, config: &Config, state: State) -> Result<Self, String> {
         let token = config.secret(
             cfg.bot_token.as_deref(),
             cfg.bot_token_env.as_deref(),
@@ -29,45 +65,139 @@ impl Telegram {
             api_url: cfg.api_url.trim_end_matches('/').to_string(),
             token,
             chat_id: cfg.chat_id,
+            topics: cfg.topics,
+            state,
             client: Client::new(),
         })
     }
 
-    fn call(&self, method: &str, params: &serde_json::Value) -> Result<(), String> {
+    /// One Bot API call. Retries once on 429. Returns the `result` value.
+    fn call(
+        &self,
+        method: &str,
+        params: &serde_json::Value,
+    ) -> Result<serde_json::Value, ApiError> {
         let url = format!("{}/bot{}/{method}", self.api_url, self.token);
-        let response = self.client.post_json(&url, params)?;
+        let transport = |err: String| ApiError {
+            method: method.to_string(),
+            status: 0,
+            description: err,
+        };
+        let mut response = self.client.post_json(&url, params).map_err(transport)?;
         if response.status == 429 {
             let wait = retry_after(&response.body).unwrap_or(1);
             if wait > MAX_RETRY_AFTER_SECS {
-                return Err(format!(
-                    "telegram 429: retry_after {wait}s is over the limit"
-                ));
+                return Err(ApiError {
+                    method: method.to_string(),
+                    status: 429,
+                    description: format!("retry_after {wait}s is over the limit"),
+                });
             }
             std::thread::sleep(std::time::Duration::from_secs(wait));
-            let response = self.client.post_json(&url, params)?;
-            return check(&response.status, &response.body, method);
+            response = self.client.post_json(&url, params).map_err(transport)?;
         }
-        check(&response.status, &response.body, method)
+        let body: serde_json::Value = serde_json::from_str(&response.body).unwrap_or_default();
+        if (200..300).contains(&response.status) && body["ok"] == true {
+            return Ok(body["result"].clone());
+        }
+        Err(ApiError {
+            method: method.to_string(),
+            status: response.status,
+            description: body["description"]
+                .as_str()
+                .map(str::to_string)
+                .unwrap_or_else(|| response.body.trim().to_string()),
+        })
     }
-}
 
-fn check(status: &u16, body: &str, method: &str) -> Result<(), String> {
-    if (200..300).contains(status) {
+    fn topic_key(&self, alert: &Alert) -> Option<String> {
+        match self.topics {
+            TopicMode::None => None,
+            TopicMode::PerAgent => Some(format!(
+                "{}|{}|{}",
+                alert.host,
+                alert.workspace_name(),
+                alert.agent
+            )),
+            TopicMode::PerWorkspace => Some(format!("{}|{}", alert.host, alert.workspace_name())),
+        }
+    }
+
+    fn topic_name(&self, alert: &Alert) -> String {
+        let name = match self.topics {
+            TopicMode::PerWorkspace => format!("{} · {}", alert.workspace_name(), alert.host),
+            _ => format!(
+                "{} · {} · {}",
+                alert.agent,
+                alert.workspace_name(),
+                alert.host
+            ),
+        };
+        name.chars().take(MAX_TOPIC_NAME).collect()
+    }
+
+    fn create_topic(&self, name: &str) -> Result<i64, String> {
+        let result = self
+            .call(
+                "createForumTopic",
+                &serde_json::json!({ "chat_id": self.chat_id, "name": name }),
+            )
+            .map_err(|err| err.to_string())?;
+        result["message_thread_id"]
+            .as_i64()
+            .ok_or_else(|| "telegram createForumTopic: no message_thread_id in result".to_string())
+    }
+
+    /// The thread to post into, reopened first when this plugin closed it.
+    fn thread_for(&self, key: &str, alert: &Alert) -> Result<i64, String> {
+        let handle = self.state.topic_thread(key, &alert.pane_id, || {
+            self.create_topic(&self.topic_name(alert))
+        })?;
+        if handle.closed {
+            self.topic_call("reopenForumTopic", handle.thread_id)?;
+            self.state.topic_set_closed(key, false)?;
+        }
+        Ok(handle.thread_id)
+    }
+
+    /// closeForumTopic or reopenForumTopic. Already in that state is success.
+    fn topic_call(&self, method: &str, thread_id: i64) -> Result<(), String> {
+        match self.call(
+            method,
+            &serde_json::json!({ "chat_id": self.chat_id, "message_thread_id": thread_id }),
+        ) {
+            Ok(_) => Ok(()),
+            Err(err) if err.description.contains("TOPIC_NOT_MODIFIED") => Ok(()),
+            Err(err) => Err(err.to_string()),
+        }
+    }
+
+    fn send_message(&self, text: &str, thread_id: Option<i64>) -> Result<(), ApiError> {
+        let mut params = serde_json::json!({
+            "chat_id": self.chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+            "link_preview_options": { "is_disabled": true },
+        });
+        if let Some(id) = thread_id {
+            params["message_thread_id"] = id.into();
+        }
+        self.call("sendMessage", &params).map(|_| ())
+    }
+
+    fn release_topic(&self, alert: &Alert) -> Result<(), String> {
+        let Some(release) = self.state.topic_pane_closed(&alert.pane_id)? else {
+            return Ok(());
+        };
+        if release.last_pane {
+            // A topic that is gone is not worth failing the hook over.
+            match self.topic_call("closeForumTopic", release.thread_id) {
+                Ok(()) => self.state.topic_set_closed(&release.key, true)?,
+                Err(err) => eprintln!("goat-herdr: {err}"),
+            }
+        }
         Ok(())
-    } else {
-        let description = serde_json::from_str::<serde_json::Value>(body)
-            .ok()
-            .and_then(|v| v["description"].as_str().map(str::to_string))
-            .unwrap_or_else(|| body.trim().to_string());
-        Err(format!("telegram {method} {status}: {description}"))
     }
-}
-
-fn retry_after(body: &str) -> Option<u64> {
-    serde_json::from_str::<serde_json::Value>(body)
-        .ok()?
-        .pointer("/parameters/retry_after")?
-        .as_u64()
 }
 
 impl Sink for Telegram {
@@ -77,17 +207,44 @@ impl Sink for Telegram {
 
     fn send(&self, alert: &Alert) -> Result<Delivery, String> {
         if alert.status == Status::Closed {
+            if self.topics != TopicMode::None {
+                self.release_topic(alert)?;
+            }
             return Ok(Delivery::Skipped);
         }
-        let params = serde_json::json!({
-            "chat_id": self.chat_id,
-            "text": render(alert),
-            "parse_mode": "HTML",
-            "disable_web_page_preview": true,
-        });
-        self.call("sendMessage", &params)?;
-        Ok(Delivery::Sent)
+        let text = render(alert);
+        let Some(key) = self.topic_key(alert) else {
+            return self
+                .send_message(&text, None)
+                .map(|()| Delivery::Sent)
+                .map_err(|err| err.to_string());
+        };
+        let thread_id = self.thread_for(&key, alert)?;
+        match self.send_message(&text, Some(thread_id)) {
+            Ok(()) => Ok(Delivery::Sent),
+            Err(err) if err.topic_closed() => {
+                self.topic_call("reopenForumTopic", thread_id)?;
+                self.send_message(&text, Some(thread_id))
+                    .map(|()| Delivery::Sent)
+                    .map_err(|err| err.to_string())
+            }
+            Err(err) if err.thread_missing() => {
+                self.state.topic_forget(&key)?;
+                let thread_id = self.thread_for(&key, alert)?;
+                self.send_message(&text, Some(thread_id))
+                    .map(|()| Delivery::Sent)
+                    .map_err(|err| err.to_string())
+            }
+            Err(err) => Err(err.to_string()),
+        }
     }
+}
+
+fn retry_after(body: &str) -> Option<u64> {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()?
+        .pointer("/parameters/retry_after")?
+        .as_u64()
 }
 
 /// HTML for one alert, within Telegram's length limit. When the tail does
@@ -134,10 +291,12 @@ mod tests {
     use super::*;
     use crate::http::mock::Server;
 
+    const OK: &str = r#"{"ok":true,"result":{}}"#;
+
     fn alert(tail: Option<&str>) -> Alert {
         Alert {
             host: "box".into(),
-            workspace: "ws <1>".into(),
+            workspace: "[1] ws <1>".into(),
             agent: "claude".into(),
             pane_id: "w1:p1".into(),
             status: Status::Blocked,
@@ -145,28 +304,170 @@ mod tests {
         }
     }
 
-    fn sink(server: &Server) -> Telegram {
+    fn temp_state(name: &str) -> (State, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "goat-herdr-tg-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        (State::new(&dir), dir)
+    }
+
+    fn sink(server: &Server, topics: TopicMode, state: State) -> Telegram {
         Telegram {
             api_url: server.url.clone(),
             token: "123:abc".into(),
             chat_id: -100,
+            topics,
+            state,
             client: Client::new(),
         }
     }
 
+    fn json(req: &crate::http::mock::Request) -> serde_json::Value {
+        serde_json::from_str(&req.body).unwrap()
+    }
+
     #[test]
-    fn sends_html_message_to_chat() {
-        let server = Server::respond(200, r#"{"ok":true,"result":{}}"#);
-        sink(&server).send(&alert(Some("run <cmd>?"))).unwrap();
+    fn sends_html_message_to_chat_root() {
+        let server = Server::respond(200, OK);
+        let (state, dir) = temp_state("root");
+        sink(&server, TopicMode::None, state)
+            .send(&alert(Some("run <cmd>?")))
+            .unwrap();
         let req = server.request();
         assert_eq!(req.path, "/bot123:abc/sendMessage");
-        let body: serde_json::Value = serde_json::from_str(&req.body).unwrap();
+        let body = json(&req);
         assert_eq!(body["chat_id"], -100);
         assert_eq!(body["parse_mode"], "HTML");
+        assert!(body.get("message_thread_id").is_none());
         assert_eq!(
             body["text"],
-            "🟥 <b>BLOCKED</b> claude · ws &lt;1&gt; · box\npane w1:p1\n<pre>run &lt;cmd&gt;?</pre>"
+            "🟥 <b>BLOCKED</b> claude · [1] ws &lt;1&gt; · box\npane w1:p1\n<pre>run &lt;cmd&gt;?</pre>"
         );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn creates_topic_once_then_posts_into_it() {
+        let server = Server::respond_seq(vec![
+            (
+                200,
+                r#"{"ok":true,"result":{"message_thread_id":555,"name":"x"}}"#,
+            ),
+            (200, OK),
+            (200, OK),
+        ]);
+        let (state, dir) = temp_state("topic");
+        let tg = sink(&server, TopicMode::PerAgent, state);
+        tg.send(&alert(None)).unwrap();
+        tg.send(&alert(None)).unwrap();
+        let reqs = server.requests();
+        assert_eq!(reqs[0].path, "/bot123:abc/createForumTopic");
+        assert_eq!(json(&reqs[0])["name"], "claude · ws <1> · box");
+        assert_eq!(reqs[1].path, "/bot123:abc/sendMessage");
+        assert_eq!(json(&reqs[1])["message_thread_id"], 555);
+        assert_eq!(reqs[2].path, "/bot123:abc/sendMessage");
+        assert_eq!(json(&reqs[2])["message_thread_id"], 555);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn topic_closed_by_plugin_is_reopened_before_posting() {
+        let server = Server::respond_seq(vec![
+            (200, r#"{"ok":true,"result":{"message_thread_id":7}}"#),
+            (200, OK),
+            (200, OK), // closeForumTopic
+            (200, OK), // reopenForumTopic
+            (200, OK),
+        ]);
+        let (state, dir) = temp_state("reopen");
+        let tg = sink(&server, TopicMode::PerAgent, state);
+        tg.send(&alert(None)).unwrap();
+        let mut closed = alert(None);
+        closed.status = Status::Closed;
+        tg.send(&closed).unwrap();
+        tg.send(&alert(None)).unwrap();
+        let paths: Vec<String> = server
+            .requests()
+            .iter()
+            .map(|r| r.path.rsplit('/').next().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            paths,
+            [
+                "createForumTopic",
+                "sendMessage",
+                "closeForumTopic",
+                "reopenForumTopic",
+                "sendMessage"
+            ]
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn already_closed_topic_is_not_an_error() {
+        let server = Server::respond_seq(vec![
+            (200, r#"{"ok":true,"result":{"message_thread_id":7}}"#),
+            (200, OK),
+            (
+                400,
+                r#"{"ok":false,"description":"Bad Request: TOPIC_NOT_MODIFIED"}"#,
+            ),
+        ]);
+        let (state, dir) = temp_state("notmod");
+        let tg = sink(&server, TopicMode::PerAgent, state);
+        tg.send(&alert(None)).unwrap();
+        let mut closed = alert(None);
+        closed.status = Status::Closed;
+        assert_eq!(tg.send(&closed).unwrap(), Delivery::Skipped);
+        server.requests();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn deleted_topic_is_recreated() {
+        let server = Server::respond_seq(vec![
+            (200, r#"{"ok":true,"result":{"message_thread_id":7}}"#),
+            (
+                400,
+                r#"{"ok":false,"description":"Bad Request: message thread not found"}"#,
+            ),
+            (200, r#"{"ok":true,"result":{"message_thread_id":8}}"#),
+            (200, OK),
+        ]);
+        let (state, dir) = temp_state("recreate");
+        sink(&server, TopicMode::PerAgent, state)
+            .send(&alert(None))
+            .unwrap();
+        let reqs = server.requests();
+        assert_eq!(reqs[2].path, "/bot123:abc/createForumTopic");
+        assert_eq!(json(&reqs[3])["message_thread_id"], 8);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn last_pane_close_closes_the_topic() {
+        let server = Server::respond_seq(vec![
+            (200, r#"{"ok":true,"result":{"message_thread_id":9}}"#),
+            (200, OK),
+            (200, OK),
+        ]);
+        let (state, dir) = temp_state("close");
+        let tg = sink(&server, TopicMode::PerAgent, state);
+        tg.send(&alert(None)).unwrap();
+        let mut closed = alert(None);
+        closed.status = Status::Closed;
+        assert_eq!(tg.send(&closed).unwrap(), Delivery::Skipped);
+        let reqs = server.requests();
+        assert_eq!(reqs[2].path, "/bot123:abc/closeForumTopic");
+        assert_eq!(json(&reqs[2])["message_thread_id"], 9);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -175,22 +476,13 @@ mod tests {
             400,
             r#"{"ok":false,"description":"Bad Request: chat not found"}"#,
         );
-        let err = sink(&server).send(&alert(None)).unwrap_err();
+        let (state, dir) = temp_state("err");
+        let err = sink(&server, TopicMode::None, state)
+            .send(&alert(None))
+            .unwrap_err();
         assert_eq!(err, "telegram sendMessage 400: Bad Request: chat not found");
         server.request();
-    }
-
-    #[test]
-    fn closed_alerts_are_skipped() {
-        let mut a = alert(None);
-        a.status = Status::Closed;
-        let sink = Telegram {
-            api_url: "http://127.0.0.1:1".into(),
-            token: "t".into(),
-            chat_id: 1,
-            client: Client::new(),
-        };
-        assert_eq!(sink.send(&a).unwrap(), Delivery::Skipped);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

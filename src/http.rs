@@ -59,8 +59,8 @@ fn read(mut response: ureq::http::Response<ureq::Body>, url: &str) -> Result<Res
     Ok(Response { status, body })
 }
 
-/// A one-shot local HTTP server for sink tests. Accepts one request, records
-/// it, and answers with the given status and body.
+/// A local HTTP server for sink tests. Answers a fixed sequence of replies,
+/// one per connection, and records every request.
 #[cfg(test)]
 pub mod mock {
     use std::io::{Read, Write};
@@ -75,14 +75,28 @@ pub mod mock {
 
     pub struct Server {
         pub url: String,
-        handle: JoinHandle<Request>,
+        handle: JoinHandle<Vec<Request>>,
     }
 
     impl Server {
         pub fn respond(status: u16, reply_body: &'static str) -> Self {
+            Self::respond_seq(vec![(status, reply_body)])
+        }
+
+        pub fn respond_seq(replies: Vec<(u16, &'static str)>) -> Self {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             let url = format!("http://{}", listener.local_addr().unwrap());
             let handle = std::thread::spawn(move || {
+                replies
+                    .into_iter()
+                    .map(|(status, reply_body)| Self::serve_one(&listener, status, reply_body))
+                    .collect()
+            });
+            Self { url, handle }
+        }
+
+        fn serve_one(listener: &TcpListener, status: u16, reply_body: &'static str) -> Request {
+            {
                 let (mut stream, _) = listener.accept().unwrap();
                 let mut raw = Vec::new();
                 let mut buf = [0u8; 4096];
@@ -121,11 +135,14 @@ pub mod mock {
                     headers,
                     body,
                 }
-            });
-            Self { url, handle }
+            }
         }
 
         pub fn request(self) -> Request {
+            self.requests().remove(0)
+        }
+
+        pub fn requests(self) -> Vec<Request> {
             self.handle.join().unwrap()
         }
     }

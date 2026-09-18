@@ -1,7 +1,7 @@
 //! Files in `HERDR_PLUGIN_STATE_DIR`. Every hook is its own process and two
 //! can run at once, so every read-modify-write holds the lock file.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -16,6 +16,34 @@ pub struct State {
 struct Debounce {
     /// pane id -> (status, unix seconds of the last alert sent)
     panes: HashMap<String, (String, u64)>,
+}
+
+/// Telegram forum topics, keyed by the routing key a sink derives from an
+/// alert. `panes` remembers which key each live pane last posted under, so a
+/// pane close (which carries no workspace label or agent) can find its topic.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct Topics {
+    threads: HashMap<String, i64>,
+    panes: HashMap<String, String>,
+    /// Keys whose topic this plugin closed. Telegram lets an admin bot post
+    /// into a closed topic without error, so the reopen has to be explicit.
+    #[serde(default)]
+    closed: HashSet<String>,
+}
+
+/// A topic to post into.
+pub struct TopicHandle {
+    pub thread_id: i64,
+    /// This plugin closed the topic; reopen it before posting.
+    pub closed: bool,
+}
+
+/// What a pane close means for its topic.
+pub struct TopicRelease {
+    pub key: String,
+    pub thread_id: i64,
+    /// No other live pane posts to this topic.
+    pub last_pane: bool,
 }
 
 impl State {
@@ -80,6 +108,78 @@ impl State {
         std::fs::write(&path, text).map_err(|err| format!("write {}: {err}", path.display()))
     }
 
+    /// The thread id for `key`, creating it through `create` under the lock
+    /// so two hooks for the same key cannot both create a topic. Records that
+    /// `pane_id` posts to this key.
+    pub fn topic_thread(
+        &self,
+        key: &str,
+        pane_id: &str,
+        create: impl FnOnce() -> Result<i64, String>,
+    ) -> Result<TopicHandle, String> {
+        let _guard = self.lock()?;
+        let path = self.dir.join("topics.json");
+        let mut topics: Topics = read_json(&path);
+        let thread_id = match topics.threads.get(key) {
+            Some(id) => *id,
+            None => {
+                let id = create()?;
+                topics.threads.insert(key.to_string(), id);
+                id
+            }
+        };
+        topics.panes.insert(pane_id.to_string(), key.to_string());
+        write_json(&path, &topics)?;
+        Ok(TopicHandle {
+            thread_id,
+            closed: topics.closed.contains(key),
+        })
+    }
+
+    /// Records whether this plugin has the topic closed.
+    pub fn topic_set_closed(&self, key: &str, closed: bool) -> Result<(), String> {
+        let _guard = self.lock()?;
+        let path = self.dir.join("topics.json");
+        let mut topics: Topics = read_json(&path);
+        if closed {
+            topics.closed.insert(key.to_string());
+        } else {
+            topics.closed.remove(key);
+        }
+        write_json(&path, &topics)
+    }
+
+    /// Drops a topic mapping that Telegram no longer knows about.
+    pub fn topic_forget(&self, key: &str) -> Result<(), String> {
+        let _guard = self.lock()?;
+        let path = self.dir.join("topics.json");
+        let mut topics: Topics = read_json(&path);
+        topics.threads.remove(key);
+        topics.closed.remove(key);
+        write_json(&path, &topics)
+    }
+
+    /// Unregisters a closed pane from its topic.
+    pub fn topic_pane_closed(&self, pane_id: &str) -> Result<Option<TopicRelease>, String> {
+        let _guard = self.lock()?;
+        let path = self.dir.join("topics.json");
+        let mut topics: Topics = read_json(&path);
+        let Some(key) = topics.panes.remove(pane_id) else {
+            return Ok(None);
+        };
+        let Some(thread_id) = topics.threads.get(&key).copied() else {
+            write_json(&path, &topics)?;
+            return Ok(None);
+        };
+        let last_pane = !topics.panes.values().any(|k| *k == key);
+        write_json(&path, &topics)?;
+        Ok(Some(TopicRelease {
+            key,
+            thread_id,
+            last_pane,
+        }))
+    }
+
     fn lock(&self) -> Result<File, String> {
         std::fs::create_dir_all(&self.dir)
             .map_err(|err| format!("create {}: {err}", self.dir.display()))?;
@@ -95,6 +195,18 @@ impl State {
             .map_err(|err| format!("lock {}: {err}", path.display()))?;
         Ok(file)
     }
+}
+
+fn read_json<T: Default + serde::de::DeserializeOwned>(path: &Path) -> T {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
+
+fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
+    let text = serde_json::to_string(value).map_err(|err| err.to_string())?;
+    std::fs::write(path, text).map_err(|err| format!("write {}: {err}", path.display()))
 }
 
 fn unix_now() -> u64 {
@@ -127,6 +239,41 @@ mod tests {
         assert!(state.debounce("p2", "blocked", 5).unwrap());
         state.forget("p1").unwrap();
         assert!(state.debounce("p1", "done", 5).unwrap());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn topics_create_once_and_release_on_last_pane() {
+        let (state, dir) = temp_state("topics");
+        let mut created = 0;
+        let h = state
+            .topic_thread("k", "p1", || {
+                created += 1;
+                Ok(41)
+            })
+            .unwrap();
+        assert_eq!((h.thread_id, h.closed), (41, false));
+        let h = state
+            .topic_thread("k", "p2", || {
+                created += 1;
+                Ok(99)
+            })
+            .unwrap();
+        assert_eq!(h.thread_id, 41);
+        assert_eq!(created, 1);
+        let r = state.topic_pane_closed("p1").unwrap().unwrap();
+        assert_eq!((r.thread_id, r.last_pane), (41, false));
+        let r = state.topic_pane_closed("p2").unwrap().unwrap();
+        assert_eq!((r.key.as_str(), r.thread_id, r.last_pane), ("k", 41, true));
+        assert!(state.topic_pane_closed("p2").unwrap().is_none());
+        state.topic_set_closed("k", true).unwrap();
+        let h = state.topic_thread("k", "p3", || Ok(7)).unwrap();
+        assert_eq!((h.thread_id, h.closed), (41, true));
+        state.topic_set_closed("k", false).unwrap();
+        assert!(!state.topic_thread("k", "p3", || Ok(7)).unwrap().closed);
+        state.topic_forget("k").unwrap();
+        let h = state.topic_thread("k", "p3", || Ok(7)).unwrap();
+        assert_eq!(h.thread_id, 7);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

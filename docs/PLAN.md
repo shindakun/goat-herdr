@@ -18,7 +18,7 @@ Every alert answers three questions in its first line: which host, which workspa
 pane w3:p3
 ```
 
-Telegram routing uses forum topics. The chat is a supergroup with Topics on; the bot is an admin with Manage Topics. One topic per `(host, workspace, agent)`. The plugin creates topics lazily with `createForumTopic`, caches `message_thread_id` in state, closes the topic on `pane.closed`, and reopens it when the same key returns. Every `sendMessage` sets `message_thread_id`. The header line is always present, so a plain private chat works as well.
+Telegram routing uses forum topics. The chat is a supergroup with Topics on; the bot is an admin with Manage Topics. One topic per `(host, workspace, agent)`, or per `(host, workspace)` with `topics = "per-workspace"`. The workspace part drops Herdr's `[n] ` ordinal so a reorder does not split a project across topics. The plugin creates topics lazily with `createForumTopic`, caches `message_thread_id` in state, closes the topic when the last pane behind it closes, and reopens it when the same key returns. Telegram lets an admin bot post into a closed topic without error, so the plugin records which topics it closed and reopens them explicitly. Every `sendMessage` sets `message_thread_id`. The header line is always present, so a plain private chat works as well.
 
 Two ways to run several hosts:
 
@@ -134,7 +134,7 @@ command = ["./target/release/goat-herdr", "toggle"]
 - `sendMessage`: `chat_id`, `text`, `message_thread_id`, `parse_mode = "HTML"`, `reply_markup`. Escape `<`, `>`, `&` in agent output. Tail goes in `<pre>`.
 - Limit 4096 chars per message. Truncate the tail from the top.
 - 429 returns `parameters.retry_after`. Sleep it, retry once, then log and give up. One message per second per chat; 20 per minute per group.
-- `createForumTopic(chat_id, name)` returns `message_thread_id`. `closeForumTopic`, `reopenForumTopic` for pane lifecycle.
+- `createForumTopic(chat_id, name)` returns `message_thread_id`. Name limit 128 chars. `closeForumTopic`, `reopenForumTopic` for pane lifecycle; `TOPIC_NOT_MODIFIED` means already in that state and counts as success. `message thread not found` means the topic was deleted; forget it and create again.
 - `getMe` at `test` time to confirm the token.
 - Blocked alerts carry an inline keyboard: `y`, `n`, `Enter`, `Tail`. A `callback_query` maps to `herdr agent send-keys` or `herdr agent read`. `answerCallbackQuery` closes the spinner.
 
@@ -163,7 +163,7 @@ The daemon dies with the Herdr server. Startup hooks run again on a new server, 
 
 1. Done. Scaffold, `notify` with the stdout sink, hook verified in a real Herdr, fixtures captured under `tests/fixtures/`.
 2. Done. Telegram sink without topics, ntfy sink, `test` sends to every sink, `toggle` pauses, debounce, tail on blocked alerts. Both sinks verified with a real blocked event and the message read back.
-3. Topics. Lazy create, state cache, close on pane exit.
+3. Done. Topics: lazy create, state cache, close when the last pane exits, explicit reopen. Verified against a real forum supergroup.
 4. Bridge. Reply, `/tail`, inline keyboard.
 5. Slack webhook sink.
 6. README, CI (fmt, clippy, test, build on three OSes).
