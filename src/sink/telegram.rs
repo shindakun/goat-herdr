@@ -4,6 +4,7 @@
 //! when the last pane behind them closes, and reopened when one returns.
 
 use crate::alert::{Alert, Status};
+use crate::bridge::{Bridge, Inbound};
 use crate::config::{Config, TelegramConfig, TopicMode};
 use crate::http::Client;
 use crate::sink::{Delivery, Sink};
@@ -21,9 +22,16 @@ pub struct Telegram {
     token: String,
     chat_id: i64,
     topics: TopicMode,
+    bridge: bool,
+    allowed_user_ids: Vec<i64>,
     state: State,
     client: Client,
+    /// Separate client for getUpdates: the long poll outlives the default timeout.
+    poll_client: Client,
 }
+
+/// Seconds Telegram holds a getUpdates call open when nothing arrives.
+const POLL_TIMEOUT_SECS: u64 = 25;
 
 /// An API call that failed, with the error text Telegram returned so the
 /// caller can react to topic state.
@@ -66,8 +74,13 @@ impl Telegram {
             token,
             chat_id: cfg.chat_id,
             topics: cfg.topics,
+            bridge: cfg.bridge,
+            allowed_user_ids: cfg.allowed_user_ids.clone(),
             state,
             client: Client::new(),
+            poll_client: Client::with_timeout(std::time::Duration::from_secs(
+                POLL_TIMEOUT_SECS + 15,
+            )),
         })
     }
 
@@ -77,13 +90,23 @@ impl Telegram {
         method: &str,
         params: &serde_json::Value,
     ) -> Result<serde_json::Value, ApiError> {
+        self.call_with(&self.client, method, params)
+    }
+
+    fn call_with(
+        &self,
+        client: &Client,
+        method: &str,
+        params: &serde_json::Value,
+    ) -> Result<serde_json::Value, ApiError> {
         let url = format!("{}/bot{}/{method}", self.api_url, self.token);
+        // The URL carries the token; no error text may echo it.
         let transport = |err: String| ApiError {
             method: method.to_string(),
             status: 0,
-            description: err,
+            description: err.replace(&self.token, "<token>"),
         };
-        let mut response = self.client.post_json(&url, params).map_err(transport)?;
+        let mut response = client.post_json(&url, params).map_err(transport)?;
         if response.status == 429 {
             let wait = retry_after(&response.body).unwrap_or(1);
             if wait > MAX_RETRY_AFTER_SECS {
@@ -94,7 +117,7 @@ impl Telegram {
                 });
             }
             std::thread::sleep(std::time::Duration::from_secs(wait));
-            response = self.client.post_json(&url, params).map_err(transport)?;
+            response = client.post_json(&url, params).map_err(transport)?;
         }
         let body: serde_json::Value = serde_json::from_str(&response.body).unwrap_or_default();
         if (200..300).contains(&response.status) && body["ok"] == true {
@@ -172,7 +195,12 @@ impl Telegram {
         }
     }
 
-    fn send_message(&self, text: &str, thread_id: Option<i64>) -> Result<(), ApiError> {
+    fn send_message(
+        &self,
+        text: &str,
+        thread_id: Option<i64>,
+        keyboard: Option<serde_json::Value>,
+    ) -> Result<(), ApiError> {
         let mut params = serde_json::json!({
             "chat_id": self.chat_id,
             "text": text,
@@ -182,7 +210,30 @@ impl Telegram {
         if let Some(id) = thread_id {
             params["message_thread_id"] = id.into();
         }
+        if let Some(keyboard) = keyboard {
+            params["reply_markup"] = keyboard;
+        }
         self.call("sendMessage", &params).map(|_| ())
+    }
+
+    /// Buttons under a blocked alert. Callback data is read by the bridge:
+    /// `k|<pane>|<key>...` sends keys, `t|<pane>` posts the tail.
+    fn keyboard(&self, alert: &Alert) -> Option<serde_json::Value> {
+        if !self.bridge || alert.status != Status::Blocked {
+            return None;
+        }
+        let pane = &alert.pane_id;
+        let button =
+            |label: &str, data: String| serde_json::json!({ "text": label, "callback_data": data });
+        Some(serde_json::json!({ "inline_keyboard": [
+            [
+                button("y", format!("k|{pane}|y|Enter")),
+                button("n", format!("k|{pane}|n|Enter")),
+                button("Enter", format!("k|{pane}|Enter")),
+                button("Esc", format!("k|{pane}|esc")),
+            ],
+            [button("Tail", format!("t|{pane}"))],
+        ] }))
     }
 
     fn release_topic(&self, alert: &Alert) -> Result<(), String> {
@@ -213,30 +264,121 @@ impl Sink for Telegram {
             return Ok(Delivery::Skipped);
         }
         let text = render(alert);
+        let keyboard = self.keyboard(alert);
         let Some(key) = self.topic_key(alert) else {
             return self
-                .send_message(&text, None)
+                .send_message(&text, None, keyboard)
                 .map(|()| Delivery::Sent)
                 .map_err(|err| err.to_string());
         };
         let thread_id = self.thread_for(&key, alert)?;
-        match self.send_message(&text, Some(thread_id)) {
+        match self.send_message(&text, Some(thread_id), keyboard.clone()) {
             Ok(()) => Ok(Delivery::Sent),
             Err(err) if err.topic_closed() => {
                 self.topic_call("reopenForumTopic", thread_id)?;
-                self.send_message(&text, Some(thread_id))
+                self.send_message(&text, Some(thread_id), keyboard)
                     .map(|()| Delivery::Sent)
                     .map_err(|err| err.to_string())
             }
             Err(err) if err.thread_missing() => {
                 self.state.topic_forget(&key)?;
                 let thread_id = self.thread_for(&key, alert)?;
-                self.send_message(&text, Some(thread_id))
+                self.send_message(&text, Some(thread_id), keyboard)
                     .map(|()| Delivery::Sent)
                     .map_err(|err| err.to_string())
             }
             Err(err) => Err(err.to_string()),
         }
+    }
+}
+
+impl Bridge for Telegram {
+    fn name(&self) -> &str {
+        "telegram"
+    }
+
+    /// One `getUpdates` long poll. The offset lives in state so a restart
+    /// does not replay old input.
+    fn poll(&self) -> Result<Vec<Inbound>, String> {
+        let mut params = serde_json::json!({
+            "timeout": POLL_TIMEOUT_SECS,
+            "allowed_updates": ["message", "callback_query"],
+        });
+        if let Some(offset) = self.state.bridge_cursor("telegram") {
+            params["offset"] = offset.into();
+        }
+        let result = self
+            .call_with(&self.poll_client, "getUpdates", &params)
+            .map_err(|err| err.to_string())?;
+        let updates = result.as_array().cloned().unwrap_or_default();
+        let mut inbounds = Vec::new();
+        let mut last_id = None;
+        for update in &updates {
+            last_id = update["update_id"].as_i64().or(last_id);
+            if let Some(inbound) = self.inbound_from(update) {
+                inbounds.push(inbound);
+            }
+        }
+        if let Some(id) = last_id {
+            self.state.set_bridge_cursor("telegram", id + 1)?;
+        }
+        Ok(inbounds)
+    }
+
+    fn reply(&self, inbound: &Inbound, text: &str, pre: bool) -> Result<(), String> {
+        let text = if pre {
+            format!("<pre>{}</pre>", escape(text))
+        } else {
+            escape(text)
+        };
+        let text: String = text.chars().take(MAX_TEXT).collect();
+        self.send_message(&text, inbound.thread_id, None)
+            .map_err(|err| err.to_string())
+    }
+
+    fn ack(&self, inbound: &Inbound, text: &str) -> Result<(), String> {
+        let Some(id) = &inbound.callback_id else {
+            return Ok(());
+        };
+        self.call(
+            "answerCallbackQuery",
+            &serde_json::json!({ "callback_query_id": id, "text": text }),
+        )
+        .map(|_| ())
+        .map_err(|err| err.to_string())
+    }
+
+    fn allowed_user(&self, user: i64) -> bool {
+        self.allowed_user_ids.contains(&user)
+    }
+}
+
+impl Telegram {
+    /// Messages and button presses in the configured chat. Everything else
+    /// (other chats, joins, edits) is dropped.
+    fn inbound_from(&self, update: &serde_json::Value) -> Option<Inbound> {
+        if let Some(cb) = update.get("callback_query") {
+            let message = cb.get("message")?;
+            if message["chat"]["id"].as_i64()? != self.chat_id {
+                return None;
+            }
+            return Some(Inbound {
+                thread_id: message["message_thread_id"].as_i64(),
+                from_user: cb["from"]["id"].as_i64()?,
+                text: cb["data"].as_str()?.to_string(),
+                callback_id: Some(cb["id"].as_str()?.to_string()),
+            });
+        }
+        let message = update.get("message")?;
+        if message["chat"]["id"].as_i64()? != self.chat_id {
+            return None;
+        }
+        Some(Inbound {
+            thread_id: message["message_thread_id"].as_i64(),
+            from_user: message["from"]["id"].as_i64()?,
+            text: message["text"].as_str()?.to_string(),
+            callback_id: None,
+        })
     }
 }
 
@@ -323,8 +465,11 @@ mod tests {
             token: "123:abc".into(),
             chat_id: -100,
             topics,
+            bridge: false,
+            allowed_user_ids: vec![],
             state,
             client: Client::new(),
+            poll_client: Client::new(),
         }
     }
 
@@ -467,6 +612,43 @@ mod tests {
         let reqs = server.requests();
         assert_eq!(reqs[2].path, "/bot123:abc/closeForumTopic");
         assert_eq!(json(&reqs[2])["message_thread_id"], 9);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn bridge_adds_keyboard_to_blocked_alerts() {
+        let server = Server::respond(200, OK);
+        let (state, dir) = temp_state("kb");
+        let mut tg = sink(&server, TopicMode::None, state);
+        tg.bridge = true;
+        tg.send(&alert(None)).unwrap();
+        let body = json(&server.request());
+        let rows = body["reply_markup"]["inline_keyboard"].as_array().unwrap();
+        assert_eq!(rows[0][0]["callback_data"], "k|w1:p1|y|Enter");
+        assert_eq!(rows[1][0]["callback_data"], "t|w1:p1");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn poll_maps_updates_and_advances_cursor() {
+        let server = Server::respond(
+            200,
+            r#"{"ok":true,"result":[
+              {"update_id":10,"message":{"chat":{"id":-100},"from":{"id":42},"message_thread_id":5,"text":"/tail 5"}},
+              {"update_id":11,"message":{"chat":{"id":-999},"from":{"id":42},"text":"other chat"}},
+              {"update_id":12,"callback_query":{"id":"cb1","from":{"id":42},"data":"t|w1:p1","message":{"chat":{"id":-100},"message_thread_id":5}}}
+            ]}"#,
+        );
+        let (state, dir) = temp_state("poll");
+        let tg = sink(&server, TopicMode::PerAgent, state);
+        let inbounds = tg.poll().unwrap();
+        assert_eq!(inbounds.len(), 2);
+        assert_eq!(inbounds[0].text, "/tail 5");
+        assert_eq!(inbounds[0].thread_id, Some(5));
+        assert_eq!(inbounds[1].callback_id.as_deref(), Some("cb1"));
+        assert_eq!(tg.state.bridge_cursor("telegram"), Some(13));
+        let req = server.request();
+        assert_eq!(req.path, "/bot123:abc/getUpdates");
         std::fs::remove_dir_all(dir).unwrap();
     }
 

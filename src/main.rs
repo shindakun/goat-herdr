@@ -5,6 +5,7 @@
 //! environment Herdr injects, so all I/O here is blocking.
 
 mod alert;
+mod bridge;
 mod config;
 mod herdr;
 mod http;
@@ -24,7 +25,7 @@ fn main() -> ExitCode {
         Some("notify") => notify(),
         Some("test") => test(),
         Some("toggle") => toggle(),
-        Some("bridge") => Err("bridge: not implemented".into()),
+        Some("bridge") => bridge_cmd(args.iter().any(|a| a == "--detach")),
         Some(other) => Err(format!("unknown subcommand: {other}")),
         None => Err(USAGE.to_string()),
     };
@@ -37,7 +38,14 @@ fn main() -> ExitCode {
     }
 }
 
-const USAGE: &str = "usage: goat-herdr <notify|bridge|test|toggle>";
+const USAGE: &str = "usage: goat-herdr <notify|bridge [--detach]|test|toggle>";
+
+/// Startup hook (`--detach`) or foreground daemon.
+fn bridge_cmd(detach: bool) -> Result<(), String> {
+    let env = PluginEnv::from_env()?;
+    let config = Config::load(&env)?;
+    bridge::run(&env, &config, detach)
+}
 
 /// Event hook entry point. Builds one alert from the Herdr event and hands it
 /// to every configured sink.

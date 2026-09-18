@@ -8,6 +8,7 @@ mod telegram;
 use std::path::Path;
 
 use crate::alert::Alert;
+use crate::bridge::Bridge;
 use crate::config::{Config, SinkConfig};
 use crate::state::State;
 
@@ -45,6 +46,23 @@ pub fn build(config: &Config, state_dir: &Path) -> Result<Vec<Box<dyn Sink>>, St
             }
         })
         .collect()
+}
+
+/// Every configured sink that has its two-way bridge turned on.
+pub fn build_bridges(config: &Config, state_dir: &Path) -> Result<Vec<Box<dyn Bridge>>, String> {
+    let mut bridges: Vec<Box<dyn Bridge>> = Vec::new();
+    for entry in &config.sinks {
+        if let SinkConfig::Telegram(cfg) = entry {
+            if cfg.bridge {
+                bridges.push(Box::new(telegram::Telegram::new(
+                    cfg,
+                    config,
+                    State::new(state_dir),
+                )?));
+            }
+        }
+    }
+    Ok(bridges)
 }
 
 /// Plain-text body shared by sinks without their own markup.

@@ -70,6 +70,13 @@ pub struct TelegramConfig {
     /// an admin with Manage Topics.
     #[serde(default)]
     pub topics: TopicMode,
+    /// Run the two-way bridge: replies in a topic go to that agent, blocked
+    /// alerts carry an inline keyboard. Needs `allowed_user_ids`.
+    #[serde(default)]
+    pub bridge: bool,
+    /// Telegram user ids the bridge takes input from. Everyone else is ignored.
+    #[serde(default)]
+    pub allowed_user_ids: Vec<i64>,
     /// Override for tests and self-hosted Bot API servers.
     #[serde(default = "default_telegram_api")]
     pub api_url: String,
@@ -217,6 +224,8 @@ type = "telegram"
 bot_token_env = "TELEGRAM_BOT_TOKEN"
 chat_id = -1001234567890
 topics = "per-agent"
+bridge = true
+allowed_user_ids = [42]
 
 [[sinks]]
 type = "ntfy"
@@ -230,6 +239,8 @@ url = "https://ntfy.sh/goats"
             SinkConfig::Telegram(t) => {
                 assert_eq!(t.chat_id, -1001234567890);
                 assert_eq!(t.topics, TopicMode::PerAgent);
+                assert!(t.bridge);
+                assert_eq!(t.allowed_user_ids, [42]);
                 assert_eq!(t.api_url, "https://api.telegram.org");
             }
             other => panic!("expected telegram, got {other:?}"),

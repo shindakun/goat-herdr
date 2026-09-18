@@ -14,10 +14,16 @@ pub struct Client {
 
 impl Client {
     pub fn new() -> Self {
+        Self::with_timeout(Duration::from_secs(20))
+    }
+
+    /// A client whose whole request may take up to `timeout`. Long polls
+    /// need more than the default.
+    pub fn with_timeout(timeout: Duration) -> Self {
         let config = ureq::Agent::config_builder()
             // Non-2xx is data here: Telegram returns retry_after in a 429 body.
             .http_status_as_error(false)
-            .timeout_global(Some(Duration::from_secs(20)))
+            .timeout_global(Some(timeout))
             .build();
         Self {
             agent: config.new_agent(),
@@ -29,7 +35,7 @@ impl Client {
             .agent
             .post(url)
             .send_json(body)
-            .map_err(|err| format!("POST {url}: {err}"))?;
+            .map_err(|err| format!("POST {}: {err}", host(url)))?;
         read(response, url)
     }
 
@@ -45,9 +51,20 @@ impl Client {
         }
         let response = request
             .send(body)
-            .map_err(|err| format!("POST {url}: {err}"))?;
+            .map_err(|err| format!("POST {}: {err}", host(url)))?;
         read(response, url)
     }
+}
+
+/// The scheme and host of a URL. Errors name only this, since the path can
+/// carry a credential (Telegram puts the bot token in the path).
+fn host(url: &str) -> &str {
+    let end = url
+        .find("://")
+        .map(|i| i + 3)
+        .and_then(|start| url[start..].find('/').map(|i| start + i))
+        .unwrap_or(url.len());
+    &url[..end]
 }
 
 fn read(mut response: ureq::http::Response<ureq::Body>, url: &str) -> Result<Response, String> {
@@ -55,8 +72,23 @@ fn read(mut response: ureq::http::Response<ureq::Body>, url: &str) -> Result<Res
     let body = response
         .body_mut()
         .read_to_string()
-        .map_err(|err| format!("POST {url}: read body: {err}"))?;
+        .map_err(|err| format!("POST {}: read body: {err}", host(url)))?;
     Ok(Response { status, body })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn host_strips_the_path() {
+        assert_eq!(
+            super::host("https://api.telegram.org/bot123:abc/sendMessage"),
+            "https://api.telegram.org"
+        );
+        assert_eq!(
+            super::host("http://127.0.0.1:8080"),
+            "http://127.0.0.1:8080"
+        );
+    }
 }
 
 /// A local HTTP server for sink tests. Answers a fixed sequence of replies,

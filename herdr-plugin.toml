@@ -28,3 +28,8 @@ command = ["./target/release/goat-herdr", "test"]
 id = "toggle"
 title = "Toggle alerts"
 command = ["./target/release/goat-herdr", "toggle"]
+
+[[actions]]
+id = "bridge"
+title = "Restart bridge"
+command = ["./target/release/goat-herdr", "bridge", "--detach"]

@@ -149,6 +149,44 @@ impl State {
         write_json(&path, &topics)
     }
 
+    /// The routing key behind a thread and the live panes posting under it.
+    pub fn topic_panes_for_thread(
+        &self,
+        thread_id: i64,
+    ) -> Result<Option<(String, Vec<String>)>, String> {
+        let _guard = self.lock()?;
+        let topics: Topics = read_json(&self.dir.join("topics.json"));
+        let Some((key, _)) = topics.threads.iter().find(|(_, id)| **id == thread_id) else {
+            return Ok(None);
+        };
+        let mut panes: Vec<String> = topics
+            .panes
+            .iter()
+            .filter(|(_, k)| *k == key)
+            .map(|(pane, _)| pane.clone())
+            .collect();
+        panes.sort();
+        Ok(Some((key.clone(), panes)))
+    }
+
+    /// Opaque per-bridge resume cursor (Telegram's update offset).
+    pub fn bridge_cursor(&self, bridge: &str) -> Option<i64> {
+        let cursors: HashMap<String, i64> = read_json(&self.dir.join("bridge-cursors.json"));
+        cursors.get(bridge).copied()
+    }
+
+    pub fn set_bridge_cursor(&self, bridge: &str, cursor: i64) -> Result<(), String> {
+        let _guard = self.lock()?;
+        let path = self.dir.join("bridge-cursors.json");
+        let mut cursors: HashMap<String, i64> = read_json(&path);
+        cursors.insert(bridge.to_string(), cursor);
+        write_json(&path, &cursors)
+    }
+
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
     /// Drops a topic mapping that Telegram no longer knows about.
     pub fn topic_forget(&self, key: &str) -> Result<(), String> {
         let _guard = self.lock()?;
@@ -261,6 +299,10 @@ mod tests {
             .unwrap();
         assert_eq!(h.thread_id, 41);
         assert_eq!(created, 1);
+        let (key, panes) = state.topic_panes_for_thread(41).unwrap().unwrap();
+        assert_eq!(key, "k");
+        assert_eq!(panes, ["p1", "p2"]);
+        assert!(state.topic_panes_for_thread(5).unwrap().is_none());
         let r = state.topic_pane_closed("p1").unwrap().unwrap();
         assert_eq!((r.thread_id, r.last_pane), (41, false));
         let r = state.topic_pane_closed("p2").unwrap().unwrap();
@@ -274,6 +316,15 @@ mod tests {
         state.topic_forget("k").unwrap();
         let h = state.topic_thread("k", "p3", || Ok(7)).unwrap();
         assert_eq!(h.thread_id, 7);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn bridge_cursor_round_trips() {
+        let (state, dir) = temp_state("cursor");
+        assert_eq!(state.bridge_cursor("telegram"), None);
+        state.set_bridge_cursor("telegram", 12).unwrap();
+        assert_eq!(state.bridge_cursor("telegram"), Some(12));
         std::fs::remove_dir_all(dir).unwrap();
     }
 
