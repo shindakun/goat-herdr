@@ -1,0 +1,30 @@
+id = "shindakun.goat-herdr"
+name = "Goat Herdr"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Alerts when an agent needs you. Telegram and ntfy."
+platforms = ["linux", "macos"]
+
+[[build]]
+command = ["cargo", "build", "--release"]
+
+[[events]]
+on = "pane.agent_status_changed"
+command = ["./target/release/goat-herdr", "notify"]
+
+[[events]]
+on = "pane.closed"
+command = ["./target/release/goat-herdr", "notify"]
+
+[[startup]]
+command = ["./target/release/goat-herdr", "bridge", "--detach"]
+
+[[actions]]
+id = "test"
+title = "Send test alert"
+command = ["./target/release/goat-herdr", "test"]
+
+[[actions]]
+id = "toggle"
+title = "Toggle alerts"
+command = ["./target/release/goat-herdr", "toggle"]

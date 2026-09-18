@@ -1,0 +1,14 @@
+{
+  "config": {
+    "default": true,
+    // long lines are fine in prose and tables
+    "MD013": false,
+    // inline HTML is used for badges and centered logos
+    "MD033": false,
+    // the first line of a doc is not always an H1
+    "MD041": false,
+    // compact |---|---| tables
+    "MD060": false
+  },
+  "ignores": ["target/**"]
+}
