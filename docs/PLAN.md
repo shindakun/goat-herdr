@@ -5,7 +5,7 @@ A Herdr plugin that alerts you when an agent needs you. Rust. One binary. Sinks 
 ## What it does
 
 1. Herdr fires `pane.agent_status_changed`. Herdr runs `goat-herdr notify`.
-2. `notify` reads `HERDR_PLUGIN_EVENT_JSON` and `HERDR_PLUGIN_CONTEXT_JSON`, builds one `Alert`, and hands it to every configured sink.
+2. `notify` reads `HERDR_PLUGIN_EVENT_JSON` and `HERDR_PLUGIN_CONTEXT_JSON`, builds one `Alert`, and hands it to every configured sink. The envelope's `event` field is the snake_case kind (`pane_agent_status_changed`); the dotted name is only in `HERDR_PLUGIN_EVENT`.
 3. A `blocked` alert carries the last N lines of the pane (`herdr agent read --lines N`) so you can see the question.
 4. Optional bridge daemon: reply in Telegram, the text goes to that agent via `herdr agent prompt`.
 
@@ -14,8 +14,8 @@ A Herdr plugin that alerts you when an agent needs you. Rust. One binary. Sinks 
 Every alert answers three questions in its first line: which host, which workspace, which agent.
 
 ```text
-🟥 BLOCKED  claude · goat-herdr · mac-mini
-pane 3 · 14:02:11
+🟥 BLOCKED claude · goat-herdr · mac-mini
+pane w3:p3
 ```
 
 Telegram routing uses forum topics. The chat is a supergroup with Topics on; the bot is an admin with Manage Topics. One topic per `(host, workspace, agent)`. The plugin creates topics lazily with `createForumTopic`, caches `message_thread_id` in state, closes the topic on `pane.closed`, and reopens it when the same key returns. Every `sendMessage` sets `message_thread_id`. The header line is always present, so a plain private chat works as well.
@@ -50,7 +50,7 @@ url = "https://ntfy.sh/steve-agents"
 token_env = "NTFY_TOKEN"               # optional, Bearer auth for self-hosted
 ```
 
-Secrets live in `config.toml` or `.env` in the config dir.
+Secrets live in `config.toml` or `.env` in the config dir. A `*_env` name is looked up in `.env` first, then the process environment.
 
 ## Code layout
 
@@ -64,7 +64,8 @@ goat-herdr/
     herdr.rs            # env + JSON parsing; wrapper over HERDR_BIN_PATH
     alert.rs            # Alert { host, workspace, agent, pane_id, status, tail, at }
     config.rs
-    state.rs            # STATE_DIR json: debounce table, topic map, poll offset; file lock
+    state.rs            # STATE_DIR json: debounce table, pause flag, topic map, poll offset; std File::lock
+    http.rs             # blocking client over ureq; test mock server
     sink/mod.rs         # trait Sink, trait Bridge, registry by `type`
     sink/telegram.rs
     sink/ntfy.rs
@@ -78,8 +79,9 @@ The sink contract:
 ```rust
 pub trait Sink {
     fn name(&self) -> &str;
-    fn send(&self, alert: &Alert) -> Result<()>;
-    fn close(&self, key: &AgentKey) -> Result<()> { Ok(()) }  // pane gone
+    /// Returns Sent or Skipped. A pane close arrives as Status::Closed;
+    /// sinks with per-agent state clean up, the rest skip it.
+    fn send(&self, alert: &Alert) -> Result<Delivery>;
 }
 
 pub trait Bridge {
@@ -90,7 +92,7 @@ pub trait Bridge {
 
 Adding a sink means one file and one match arm in `sink/mod.rs`. ntfy is a single HTTP POST and is the reference for every webhook-style sink after it.
 
-Dependencies: `ureq` (rustls), `serde`, `serde_json`, `toml`, `fs4` (lock), `gethostname`. All I/O is blocking. Each hook is a short-lived process.
+Dependencies: `ureq` (rustls, json), `serde`, `serde_json`, `toml`. File locks use `std::fs::File::lock`; the hostname comes from `hostname(1)`. All I/O is blocking. Each hook is a short-lived process.
 
 ## Manifest
 
@@ -159,8 +161,8 @@ The daemon dies with the Herdr server. Startup hooks run again on a new server, 
 
 ## Milestones
 
-1. Scaffold. `notify` with the stdout sink. Link into a real Herdr, start an agent, confirm the hook fires in `herdr plugin log list`. Capture fixture JSON from the real event.
-2. Telegram sink, no topics, and the ntfy sink. `test` action sends to every configured sink. Debounce and tail.
+1. Done. Scaffold, `notify` with the stdout sink, hook verified in a real Herdr, fixtures captured under `tests/fixtures/`.
+2. Done. Telegram sink without topics, ntfy sink, `test` sends to every sink, `toggle` pauses, debounce, tail on blocked alerts.
 3. Topics. Lazy create, state cache, close on pane exit.
 4. Bridge. Reply, `/tail`, inline keyboard.
 5. Slack webhook sink.

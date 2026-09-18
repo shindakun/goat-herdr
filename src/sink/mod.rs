@@ -1,14 +1,24 @@
 //! Delivery targets. One module per service; `build` maps config entries to
 //! instances. Adding a service means one file here and one match arm below.
 
+mod ntfy;
 mod stdout;
+mod telegram;
 
 use crate::alert::Alert;
 use crate::config::{Config, SinkConfig};
 
 pub trait Sink {
     fn name(&self) -> &str;
-    fn send(&self, alert: &Alert) -> Result<(), String>;
+    fn send(&self, alert: &Alert) -> Result<Delivery, String>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Delivery {
+    Sent,
+    /// The sink has nothing to do for this alert (for example, a pane close
+    /// on a sink with no per-agent state).
+    Skipped,
 }
 
 /// Instantiates every configured sink. With no sinks configured, alerts go to
@@ -23,7 +33,24 @@ pub fn build(config: &Config) -> Result<Vec<Box<dyn Sink>>, String> {
         .map(|entry| -> Result<Box<dyn Sink>, String> {
             match entry {
                 SinkConfig::Stdout => Ok(Box::new(stdout::Stdout)),
+                SinkConfig::Telegram(cfg) => Ok(Box::new(telegram::Telegram::new(cfg, config)?)),
+                SinkConfig::Ntfy(cfg) => Ok(Box::new(ntfy::Ntfy::new(cfg, config)?)),
             }
         })
         .collect()
+}
+
+/// Plain-text body shared by sinks without their own markup.
+pub fn plain_text(alert: &Alert) -> String {
+    let mut text = format!(
+        "{} {}\npane {}",
+        alert.status.emoji(),
+        alert.headline(),
+        alert.pane_id
+    );
+    if let Some(tail) = &alert.tail {
+        text.push_str("\n---\n");
+        text.push_str(tail);
+    }
+    text
 }

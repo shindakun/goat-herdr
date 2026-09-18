@@ -2,7 +2,7 @@
 //! JSON directly.
 
 use crate::config::Config;
-use crate::herdr::{self, PluginEnv};
+use crate::herdr;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Alert {
@@ -47,32 +47,30 @@ impl Status {
             Self::Closed => "closed",
         }
     }
+
+    pub fn emoji(self) -> &'static str {
+        match self {
+            Self::Idle => "⬜",
+            Self::Working => "🟦",
+            Self::Blocked => "🟥",
+            Self::Done => "🟩",
+            Self::Unknown => "⬛",
+            Self::Closed => "✖",
+        }
+    }
 }
 
 impl Alert {
-    /// Builds an alert from the hook environment. Returns `Ok(None)` when the
-    /// event is one the config says to ignore.
-    pub fn from_event(env: &PluginEnv, config: &Config) -> Result<Option<Self>, String> {
-        let event_json = env
-            .event_json
-            .as_deref()
-            .ok_or("HERDR_PLUGIN_EVENT_JSON is not set; this is an event hook")?;
-        let event = herdr::parse_event(event_json)?;
-        let context = match env.context_json.as_deref() {
-            Some(json) => herdr::parse_context(json)?,
-            None => herdr::Context::default(),
-        };
-        Ok(Self::build(&event, &context, config))
-    }
-
-    fn build(
+    /// Builds an alert from a hook event. Returns `None` when the event is
+    /// one the config says to ignore.
+    pub fn from_event(
         event: &herdr::EventEnvelope,
         context: &herdr::Context,
         config: &Config,
     ) -> Option<Self> {
         let status = match event.event.as_str() {
-            "pane.closed" => Status::Closed,
-            "pane.agent_status_changed" => Status::parse(event.data.agent_status.as_deref()?),
+            "pane_closed" => Status::Closed,
+            "pane_agent_status_changed" => Status::parse(event.data.agent_status.as_deref()?),
             _ => return None,
         };
         if status != Status::Closed && !config.alerts.statuses.contains(&status.as_str().into()) {
@@ -117,7 +115,7 @@ impl Alert {
         }
     }
 
-    /// The first line of every rendered alert: host, workspace, agent.
+    /// The first line of every rendered alert: status, agent, workspace, host.
     pub fn headline(&self) -> String {
         format!(
             "{} {} · {} · {}",
@@ -133,6 +131,12 @@ impl Alert {
 mod tests {
     use super::*;
 
+    const STATUS_EVENT: &str = include_str!("../tests/fixtures/agent_status_changed.event.json");
+    const STATUS_CONTEXT: &str =
+        include_str!("../tests/fixtures/agent_status_changed.context.json");
+    const CLOSED_EVENT: &str = include_str!("../tests/fixtures/pane_closed.event.json");
+    const CLOSED_CONTEXT: &str = include_str!("../tests/fixtures/pane_closed.context.json");
+
     fn config() -> Config {
         let mut config = Config::default();
         config.alerts.host_label = "box".to_string();
@@ -141,40 +145,43 @@ mod tests {
 
     #[test]
     fn blocked_status_change_becomes_alert() {
-        let event = herdr::parse_event(
-            r#"{"event":"pane.agent_status_changed","data":{"pane_id":"pane-3","workspace_id":"ws-1","agent_status":"blocked","agent":"claude","display_agent":"Claude Code"}}"#,
-        )
-        .unwrap();
-        let context =
-            herdr::parse_context(r#"{"workspace_id":"ws-1","workspace_label":"goat-herdr"}"#)
-                .unwrap();
-        let alert = Alert::build(&event, &context, &config()).unwrap();
+        let event = herdr::parse_event(STATUS_EVENT).unwrap();
+        let context = herdr::parse_context(STATUS_CONTEXT).unwrap();
+        let alert = Alert::from_event(&event, &context, &config()).unwrap();
         assert_eq!(alert.status, Status::Blocked);
-        assert_eq!(alert.agent, "Claude Code");
-        assert_eq!(alert.workspace, "goat-herdr");
-        assert_eq!(alert.pane_id, "pane-3");
-        assert_eq!(alert.headline(), "BLOCKED Claude Code · goat-herdr · box");
+        assert_eq!(alert.agent, "claude");
+        assert_eq!(alert.workspace, "[1] goat-herdr");
+        assert_eq!(alert.pane_id, "w3:pD");
+        assert_eq!(alert.headline(), "BLOCKED claude · [1] goat-herdr · box");
     }
 
     #[test]
-    fn working_status_is_filtered_by_default() {
-        let event = herdr::parse_event(
-            r#"{"event":"pane.agent_status_changed","data":{"pane_id":"pane-3","workspace_id":"ws-1","agent_status":"working"}}"#,
-        )
+    fn display_agent_wins_over_agent() {
+        let event = herdr::parse_event(&STATUS_EVENT.replace(
+            r#""agent":"claude""#,
+            r#""agent":"claude","display_agent":"Claude Code""#,
+        ))
         .unwrap();
-        let context = herdr::Context::default();
-        assert!(Alert::build(&event, &context, &config()).is_none());
+        let context = herdr::parse_context(STATUS_CONTEXT).unwrap();
+        let alert = Alert::from_event(&event, &context, &config()).unwrap();
+        assert_eq!(alert.agent, "Claude Code");
+    }
+
+    #[test]
+    fn unlisted_status_is_filtered() {
+        let event =
+            herdr::parse_event(&STATUS_EVENT.replace(r#""blocked""#, r#""working""#)).unwrap();
+        let context = herdr::parse_context(STATUS_CONTEXT).unwrap();
+        assert!(Alert::from_event(&event, &context, &config()).is_none());
     }
 
     #[test]
     fn pane_closed_becomes_closed_alert() {
-        let event = herdr::parse_event(
-            r#"{"event":"pane.closed","data":{"pane_id":"pane-3","workspace_id":"ws-1"}}"#,
-        )
-        .unwrap();
-        let context = herdr::Context::default();
-        let alert = Alert::build(&event, &context, &config()).unwrap();
+        let event = herdr::parse_event(CLOSED_EVENT).unwrap();
+        let context = herdr::parse_context(CLOSED_CONTEXT).unwrap();
+        let alert = Alert::from_event(&event, &context, &config()).unwrap();
         assert_eq!(alert.status, Status::Closed);
-        assert_eq!(alert.workspace, "ws-1");
+        assert_eq!(alert.pane_id, "w3:pD");
+        assert_eq!(alert.workspace, "w3");
     }
 }

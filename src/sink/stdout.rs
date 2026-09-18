@@ -2,7 +2,7 @@
 //! configured; output lands in `herdr plugin log list`.
 
 use crate::alert::Alert;
-use crate::sink::Sink;
+use crate::sink::{Delivery, Sink};
 
 pub struct Stdout;
 
@@ -11,12 +11,8 @@ impl Sink for Stdout {
         "stdout"
     }
 
-    fn send(&self, alert: &Alert) -> Result<(), String> {
-        println!("{}", alert.headline());
-        println!("pane {}", alert.pane_id);
-        if let Some(tail) = &alert.tail {
-            println!("---\n{tail}");
-        }
-        Ok(())
+    fn send(&self, alert: &Alert) -> Result<Delivery, String> {
+        println!("{}", super::plain_text(alert));
+        Ok(Delivery::Sent)
     }
 }
