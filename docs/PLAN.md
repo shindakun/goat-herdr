@@ -162,17 +162,31 @@ The daemon dies with the Herdr server. Startup hooks run again on a new server, 
 ## Milestones
 
 1. Done. Scaffold, `notify` with the stdout sink, hook verified in a real Herdr, fixtures captured under `tests/fixtures/`.
-2. Done. Telegram sink without topics, ntfy sink, `test` sends to every sink, `toggle` pauses, debounce, tail on blocked alerts.
+2. Telegram sink without topics, ntfy sink, `test` sends to every sink, `toggle` pauses, debounce, tail on blocked alerts. ntfy is verified end to end. Telegram is unverified against the live API; the milestone stays open until a real message arrives.
 3. Topics. Lazy create, state cache, close on pane exit.
 4. Bridge. Reply, `/tail`, inline keyboard.
 5. Slack webhook sink.
-6. README, CI (fmt, clippy, test, build on three OSes), GitHub topic `herdr-plugin`.
+6. README, CI (fmt, clippy, test, build on three OSes).
 
 ## Checks before each milestone closes
 
 - Unit tests parse the captured fixtures.
 - Telegram sink tests run against a local `TcpListener` mock and assert the request body.
-- The real path is exercised: linked plugin, real agent, real message on a phone.
+- `cargo build --release` before any real-Herdr run. The linked manifest executes `target/release/goat-herdr`; `make check` builds debug only, so a stale release binary passes every test and still runs old code.
+- The real path is exercised: linked plugin, real agent, real message on a phone. For each sink, the message is read back from the service, not inferred from the plugin log.
+
+## Release checklist
+
+Run every line. A line that cannot be run blocks the release.
+
+1. `make check` and `cargo build --release` on a clean tree; CI green on `main`.
+2. `herdr plugin unlink shindakun.goat-herdr`, then `herdr plugin install shindakun/goat-herdr --yes` from the commit being released. The install preview shows the manifest, the build runs, and `herdr plugin list` shows the plugin enabled.
+3. `herdr plugin action invoke shindakun.goat-herdr.test` with every sink in the plan configured. Each message is read back from its service (Telegram `getUpdates` or the phone, ntfy `json?poll=1`).
+4. A real agent, not `report-agent`: start `claude` in a pane, give it a prompt that asks a question, confirm the blocked alert arrives with the pane tail.
+5. Restart the Herdr server and confirm the startup hook logs a success in `herdr plugin log list`.
+6. README matches the config the release accepts: every key in `config.rs` is documented, no key in the docs is unimplemented.
+7. `CHANGELOG.md` has the version and date. `version` in `Cargo.toml` and `herdr-plugin.toml` match.
+8. Tag `vX.Y.Z`, push the tag, confirm the marketplace card shows the new version within an hour.
 
 ## Windows
 
