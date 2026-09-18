@@ -18,7 +18,7 @@ Every alert answers three questions in its first line: which host, which workspa
 pane w3:p3
 ```
 
-Telegram routing uses forum topics. The chat is a supergroup with Topics on; the bot is an admin with Manage Topics. One topic per `(host, workspace, agent)`, or per `(host, workspace)` with `topics = "per-workspace"`. The workspace part drops Herdr's `[n] ` ordinal so a reorder does not split a project across topics. The plugin creates topics lazily with `createForumTopic`, caches `message_thread_id` in state, closes the topic when the last pane behind it closes, and reopens it when the same key returns. Telegram lets an admin bot post into a closed topic without error, so the plugin records which topics it closed and reopens them explicitly. Every `sendMessage` sets `message_thread_id`. The header line is always present, so a plain private chat works as well.
+Telegram routing uses forum topics. The chat is a supergroup with Topics on; the bot is an admin with Manage Topics. One topic per `(host, workspace, agent)`, or per `(host, workspace)` with `topics = "per-workspace"`. The workspace part drops Herdr's `[n]` ordinal prefix so a reorder does not split a project across topics. The plugin creates topics lazily with `createForumTopic`, caches `message_thread_id` in state, closes the topic when the last pane behind it closes, and reopens it when the same key returns. Telegram lets an admin bot post into a closed topic without error, so the plugin records which topics it closed and reopens them explicitly. Every `sendMessage` sets `message_thread_id`. The header line is always present, so a plain private chat works as well.
 
 Two ways to run several hosts:
 
