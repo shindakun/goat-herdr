@@ -41,6 +41,8 @@ type = "telegram"
 bot_token_env = "TELEGRAM_BOT_TOKEN"   # or bot_token = "123:abc"
 chat_id = -1001234567890
 topics = "per-agent"                   # none | per-agent | per-workspace
+bridge = true                          # two-way: reply in a topic to prompt that agent
+allowed_user_ids = [123456789]         # your Telegram user id; required for the bridge
 
 [[sinks]]
 type = "ntfy"
@@ -68,10 +70,7 @@ pane w3:p3
 
 ## Bridge
 
-With `topics = "per-agent"                   # none | per-agent | per-workspace
-bridge = true                          # two-way: reply in a topic to prompt that agent
-allowed_user_ids = [123456789]         # your Telegram user id; required for the bridge
-` and your Telegram user id in `allowed_user_ids`, the startup hook runs a small daemon that polls the bot. In an agent's topic:
+With `bridge = true` and your Telegram user id in `allowed_user_ids`, the startup hook runs a small daemon that polls the bot. In an agent's topic:
 
 | You send | It does |
 |---|---|
