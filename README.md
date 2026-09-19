@@ -1,8 +1,10 @@
 # goat-herdr
 
-A [Herdr](https://herdr.dev) plugin that alerts you when an agent needs you. Telegram, ntfy, Slack, and a generic JSON webhook.
+A [Herdr](https://herdr.dev) plugin that alerts you when an agent needs you. Telegram, ntfy, Slack, or any JSON webhook. From Telegram you can answer the agent.
 
-Status: alerts and the two-way Telegram bridge work. Telegram with forum topics, ntfy, Slack incoming webhooks, and a generic JSON webhook. See [docs/PLAN.md](docs/PLAN.md).
+- An agent goes `blocked` or `done`: one message, with the host, workspace, agent, pane, and the last lines of its terminal.
+- Telegram forum topics give each agent pane its own thread.
+- Reply in that thread and the text goes to the agent. Buttons under a blocked alert answer its dialog.
 
 ## Install
 
@@ -10,30 +12,17 @@ Status: alerts and the two-way Telegram bridge work. Telegram with forum topics,
 herdr plugin install shindakun/goat-herdr
 ```
 
-Requires `cargo`; the install step builds the binary.
-
-## Develop
-
-```sh
-git clone https://github.com/shindakun/goat-herdr
-cd goat-herdr
-cargo build --release
-herdr plugin link .
-herdr plugin action invoke shindakun.goat-herdr.test
-herdr plugin log list --plugin shindakun.goat-herdr
-```
-
-`make check` runs fmt, clippy, tests, and markdownlint. CI runs the same on Linux and macOS.
+Needs `cargo`; the install step builds the binary. Linux and macOS.
 
 ## Configure
 
-`$(herdr plugin config-dir shindakun.goat-herdr)/config.toml`. With no file, alerts print to the plugin log.
+Config lives in `$(herdr plugin config-dir shindakun.goat-herdr)/config.toml`. With no file, alerts print to the plugin log (`herdr plugin log list --plugin shindakun.goat-herdr`).
 
 ```toml
 [alerts]
-statuses = ["blocked", "done"]   # which agent states fire
+statuses = ["blocked", "done"]   # agent states that fire; also idle, working, unknown
 debounce_secs = 5                # drop a repeat of the same pane and state inside this window
-tail_lines = 30                  # pane output attached to blocked alerts, 0 to disable
+tail_lines = 30                  # pane output attached to blocked alerts; 0 disables
 host_label = "mac-mini"          # default: hostname
 
 [[sinks]]
@@ -41,13 +30,13 @@ type = "telegram"
 bot_token_env = "TELEGRAM_BOT_TOKEN"   # or bot_token = "123:abc"
 chat_id = -1001234567890
 topics = "per-agent"                   # none | per-agent | per-workspace
-bridge = true                          # two-way: reply in a topic to prompt that agent
-allowed_user_ids = [123456789]         # your Telegram user id; required for the bridge
+bridge = true                          # two-way; needs allowed_user_ids
+allowed_user_ids = [123456789]         # Telegram user ids the bridge obeys
 
 [[sinks]]
 type = "ntfy"
 url = "https://ntfy.sh/your-topic"
-token_env = "NTFY_TOKEN"               # optional
+token_env = "NTFY_TOKEN"               # optional Bearer token
 
 [[sinks]]
 type = "slack"
@@ -55,21 +44,49 @@ webhook_url_env = "SLACK_WEBHOOK_URL"  # or webhook_url = "https://hooks.slack.c
 
 [[sinks]]
 type = "webhook"
-url = "https://example.com/hook"       # or url_env = "MY_HOOK_URL" when the URL is a secret
+url = "https://example.com/hook"       # or url_env = "MY_HOOK_URL"
 ```
 
-Put secrets in `.env` next to `config.toml`:
+Any `*_env` key names a variable that is read from `.env` next to `config.toml` first, then from the environment. Keep secrets there:
 
 ```sh
 TELEGRAM_BOT_TOKEN=123456:abc...
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 ```
 
-Slack setup: at api.slack.com/apps create an app from a manifest with the `incoming-webhook` bot scope, open Incoming Webhooks, add a webhook to the channel you want, and copy its URL. The URL is the credential. Slack is one-way; there is no bridge.
+Every alert starts with the same line, so one chat can carry several machines:
+
+```text
+🟥 BLOCKED claude · goat-herdr · mac-mini
+pane w3:p3
+<last 30 lines of the pane>
+```
+
+## Sinks
+
+### Telegram
+
+Create a bot with @BotFather and put its token in `.env`. Send the bot a message, or add it to a group and post there, then read `chat.id` from `https://api.telegram.org/bot<token>/getUpdates`.
+
+`topics` needs a supergroup with Topics turned on and the bot as an admin with Manage Topics.
+
+- `per-agent`: one topic per agent pane, named `claude · goat-herdr · mac-mini · w3:p16`. A reply in the topic reaches that pane and no other. The topic is created on the first alert, closed when the pane closes, and reopened if the pane alerts again.
+- `per-workspace`: one topic per host and workspace, shared by every agent in it.
+- `none`: everything in the chat root.
+
+`api_url` overrides `https://api.telegram.org` for a self-hosted Bot API server.
+
+### ntfy
+
+One POST per alert to the topic URL. `Title` is the headline, `Priority` is `urgent` for blocked and `default` for done, `Tags` is the status square. `token` or `token_env` adds `Authorization: Bearer` for a protected topic. One-way.
+
+### Slack
+
+At api.slack.com/apps create an app from a manifest with the `incoming-webhook` bot scope, open Incoming Webhooks, add a webhook to a channel, and copy the URL. One POST per alert in mrkdwn with the tail in a code block. The URL is the credential. One-way.
 
 ### Generic webhook
 
-`type = "webhook"` POSTs one JSON document per alert, `Content-Type: application/json`, to the URL. Any 2xx response counts as delivered. Pane closes are not sent. There are no headers or auth options; a secret goes in the URL through `url_env`.
+One JSON POST per alert, `Content-Type: application/json`. Any 2xx is delivered. Pane closes are not sent. No headers or auth; a secret rides in the URL through `url_env`. One-way.
 
 ```json
 {
@@ -85,46 +102,72 @@ Slack setup: at api.slack.com/apps create an app from a manifest with the `incom
 }
 ```
 
-`status` is one of `blocked`, `done`, `idle`, `working`, `unknown`. `tail` is present on blocked alerts when `tail_lines` is above zero. `text` is the same plain rendering ntfy and the plugin log get, for receivers that only want to display something.
+`status` is `blocked`, `done`, `idle`, `working`, or `unknown`. `tail` is set on blocked alerts when `tail_lines` is above zero. `text` is the plain rendering ntfy and the plugin log use.
 
-Telegram setup: create a bot with @BotFather, start a chat with it (or add it to a group), then get the chat id from `https://api.telegram.org/bot<token>/getUpdates` after sending it a message.
+### Adding one
 
-Topics need a supergroup with Topics turned on and the bot as an admin with Manage Topics. `per-agent` gives one topic per agent pane (`claude · goat-herdr · mac-mini · w3:p16`), so a reply in a topic reaches exactly that agent; `per-workspace` one per host and workspace, shared by every agent in it. The plugin creates a topic on the first alert, closes it when the pane closes, and reopens it if the same pane alerts again. `none` posts everything to the chat root.
-
-Every alert leads with host, workspace, and agent, so one chat can carry several machines:
-
-```text
-🟥 BLOCKED claude · goat-herdr · mac-mini
-pane w3:p3
-<last 30 lines of the pane>
-```
+A sink is one file under `src/sink/` with a `name` and a `send`, plus one match arm in `src/sink/mod.rs` and a config struct. `ntfy.rs` is the template. Services with the same shape, an HTTP POST and a token: Discord (webhook, `content` field), Mattermost (Slack-compatible webhook), Microsoft Teams (workflow webhook), Gotify, Pushover, Pushbullet, Matrix (a room webhook bot), and a desktop notifier (`osascript` on macOS, `notify-send` on Linux). Anything the `apprise` CLI covers can be reached by shelling out to it.
 
 ## Bridge
 
-With `bridge = true` and your Telegram user id in `allowed_user_ids`, the startup hook runs a small daemon that polls the bot. In an agent's topic:
+With `bridge = true` and your Telegram user id in `allowed_user_ids`, the startup hook runs a daemon that polls the bot. In an agent's topic:
 
 | You send | It does |
 |---|---|
-| plain text | prompts the agent; if the agent is waiting on a dialog, types it into the dialog's text field |
-| a button under a blocked alert | picks that numbered option, or `Enter`, `Esc`, or posts the pane `Tail` |
+| plain text | prompts the agent; when the agent is waiting on a dialog, types it into the dialog's text field |
+| a button under a blocked alert | picks that numbered option, or sends `Enter` or `Esc`, or posts the pane `Tail` |
 | `/tail [n]` | posts the last n lines of the pane |
 | `/keys y Enter` | sends key presses |
-| `/status`, `/agents` | agent state |
+| `/status` | this agent's row from `herdr agent list` |
+| `/agents` | every live agent (works in any topic) |
+| `/help` | the command list |
 
-The bridge log is `bridge.log` in the plugin's state directory.
+Blocked alerts show the dialog's numbered options as buttons. A free-text option (`Type something`, `Other`) selects the field; your next text reply fills it.
+
+Every input and every dropped update is one line in `bridge.log` in the plugin's state directory.
+
+## Actions
+
+| Action | Does |
+|---|---|
+| `shindakun.goat-herdr.test` | sends a test alert to every sink |
+| `shindakun.goat-herdr.toggle` | pauses or resumes alerts |
+| `shindakun.goat-herdr.bridge` | restarts the bridge daemon |
+
+Bind one in your Herdr config:
+
+```toml
+[[keys.command]]
+key = "prefix+shift+a"
+type = "plugin_action"
+command = "shindakun.goat-herdr.toggle"
+description = "toggle agent alerts"
+```
 
 ## Security
 
-The bridge lets a chat message drive a terminal on your machine, so it is strict about who it listens to.
+The bridge lets a chat message drive a terminal on your machine.
 
-- Only Telegram user ids listed in `allowed_user_ids` are accepted. Everyone else is logged as `ignored user <id>` and dropped: nothing reaches Herdr, nothing is replied. An empty list accepts nobody.
-- Only updates from the configured `chat_id` are read. Other chats are dropped.
-- Telegram user ids are not secret, so this is "only this account", not a password. Keep the group private and add only people you would hand a shell to.
-- The bot token is the real credential. Anyone with it can read the group and post as the bot, and with the bot's admin rights create and close topics. Keep it in `.env` in the plugin config directory (mode 600), never in the plugin root or the repo. The plugin never writes the token to its logs or error messages; if it ever leaks, revoke it in @BotFather.
-- Blocked alerts include the last lines of the agent's terminal. Whatever is on screen goes to the chat, so do not point the plugin at a group you would not paste your terminal into.
-- Alerts and the bridge go over HTTPS to `api.telegram.org` and your ntfy server. Nothing else is contacted.
+- Only Telegram user ids in `allowed_user_ids` are accepted. Everyone else is logged as `ignored user <id>` and dropped: nothing reaches Herdr, nothing is replied. An empty list accepts nobody.
+- Only updates from the configured `chat_id` are read.
+- Telegram user ids are not secret. This is "only this account", not a password. Keep the group private and add only people you would hand a shell to.
+- The bot token is the credential. Anyone with it can read the group, post as the bot, and use the bot's admin rights. Keep it in `.env` in the plugin config directory, mode 600, never in the plugin root or a repo. The plugin does not write it to logs or error messages. If it leaks, revoke it in @BotFather.
+- Slack webhook URLs and secret webhook URLs are credentials in the same way. Errors name the host only, never the path.
+- Blocked alerts carry the last lines of the agent's terminal. Whatever is on screen goes to every configured sink.
+- Network destinations are the configured sinks: `api.telegram.org`, your ntfy server, `hooks.slack.com`, your webhook URL. Nothing else.
 
-Actions: `shindakun.goat-herdr.test` sends a test alert to every sink; `shindakun.goat-herdr.toggle` pauses and resumes alerts; `shindakun.goat-herdr.bridge` restarts the bridge. Bind any with a `plugin_action` key in your Herdr config.
+## Develop
+
+```sh
+git clone https://github.com/shindakun/goat-herdr
+cd goat-herdr
+cargo build --release
+herdr plugin link .
+herdr plugin action invoke shindakun.goat-herdr.test
+herdr plugin log list --plugin shindakun.goat-herdr
+```
+
+`make check` runs fmt, clippy, tests, `cargo audit`, and markdownlint. CI runs the same on Linux and macOS. The linked plugin executes `target/release/goat-herdr`, so rebuild release before testing in Herdr. Design and milestones: [docs/PLAN.md](docs/PLAN.md).
 
 ## License
 

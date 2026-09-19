@@ -6,7 +6,7 @@ description = "Herdr plugin that alerts you when an agent needs you"
 license = "MIT"
 repository = "https://github.com/shindakun/goat-herdr"
 readme = "README.md"
-keywords = ["herdr", "telegram", "ntfy", "alerts"]
+keywords = ["herdr", "telegram", "ntfy", "slack", "alerts"]
 categories = ["command-line-utilities"]
 
 [dependencies]

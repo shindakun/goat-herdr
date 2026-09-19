@@ -1,12 +1,12 @@
 # goat-herdr
 
-A Herdr plugin that alerts you when an agent needs you. Rust. One binary. Sinks are modules. Telegram and ntfy ship together in 0.1: Telegram is the rich path, ntfy proves a plain HTTP webhook sink.
+A Herdr plugin that alerts you when an agent needs you. Rust. One binary. Sinks are modules: Telegram (with a two-way bridge), ntfy, Slack, and a generic JSON webhook.
 
 ## What it does
 
 1. Herdr fires `pane.agent_status_changed`. Herdr runs `goat-herdr notify`.
 2. `notify` reads `HERDR_PLUGIN_EVENT_JSON` and `HERDR_PLUGIN_CONTEXT_JSON`, builds one `Alert`, and hands it to every configured sink. The envelope's `event` field is the snake_case kind (`pane_agent_status_changed`); the dotted name is only in `HERDR_PLUGIN_EVENT`.
-3. A `blocked` alert carries the last N lines of the pane (`herdr agent read --lines N`) so you can see the question.
+3. A `blocked` alert carries the last N lines of the pane (`herdr pane read --lines N`) so you can see the question.
 4. Optional bridge daemon: reply in Telegram, the text goes to that agent via `herdr agent prompt`.
 
 ## Identity: which agent, which machine
@@ -46,8 +46,16 @@ bridge = true
 
 [[sinks]]
 type = "ntfy"
-url = "https://ntfy.sh/steve-agents"
+url = "https://ntfy.sh/your-topic"
 token_env = "NTFY_TOKEN"               # optional, Bearer auth for self-hosted
+
+[[sinks]]
+type = "slack"
+webhook_url_env = "SLACK_WEBHOOK_URL"
+
+[[sinks]]
+type = "webhook"
+url = "https://example.com/hook"       # or url_env
 ```
 
 Secrets live in `config.toml` or `.env` in the config dir. A `*_env` name is looked up in `.env` first, then the process environment.
@@ -58,13 +66,14 @@ Secrets live in `config.toml` or `.env` in the config dir. A `*_env` name is loo
 goat-herdr/
   herdr-plugin.toml
   Cargo.toml
-  Makefile              # check: fmt clippy test
+  Makefile              # check: fmt clippy test audit md-lint
   src/
     main.rs             # subcommands: notify, bridge, test, toggle
     herdr.rs            # env + JSON parsing; wrapper over HERDR_BIN_PATH
-    alert.rs            # Alert { host, workspace, agent, pane_id, status, tail, at }
+    alert.rs            # Alert { host, workspace, agent, pane_id, status, tail }
     config.rs
-    state.rs            # STATE_DIR json: debounce table, pause flag, topic map, poll offset; std File::lock
+    state.rs            # STATE_DIR json: debounce table, pause flag, topic map, bridge cursor; std File::lock
+    bridge.rs           # daemon lifecycle, command dispatch
     http.rs             # blocking client over ureq; test mock server
     sink/mod.rs         # trait Sink, trait Bridge, registry by `type`
     sink/telegram.rs
@@ -86,8 +95,11 @@ pub trait Sink {
 }
 
 pub trait Bridge {
-    fn poll(&self, state: &mut State) -> Result<Vec<Inbound>>;  // blocks up to 30s
-    fn ack(&self, inbound: &Inbound, reply: &str) -> Result<()>;
+    fn name(&self) -> &str;
+    fn poll(&self) -> Result<Vec<Inbound>>;                 // blocks up to 25s
+    fn reply(&self, to: &Inbound, text: &str, pre: bool) -> Result<()>;
+    fn ack(&self, to: &Inbound, toast: &str) -> Result<()>; // button presses
+    fn allowed_user(&self, user: i64) -> bool;
 }
 ```
 
@@ -115,6 +127,10 @@ command = ["./target/release/goat-herdr", "notify"]
 on = "pane.closed"
 command = ["./target/release/goat-herdr", "notify"]
 
+[[events]]
+on = "pane.exited"
+command = ["./target/release/goat-herdr", "notify"]
+
 [[startup]]
 command = ["./target/release/goat-herdr", "bridge", "--detach"]
 
@@ -127,6 +143,11 @@ command = ["./target/release/goat-herdr", "test"]
 id = "toggle"
 title = "Toggle alerts"
 command = ["./target/release/goat-herdr", "toggle"]
+
+[[actions]]
+id = "bridge"
+title = "Restart bridge"
+command = ["./target/release/goat-herdr", "bridge", "--detach"]
 ```
 
 ## Telegram details
@@ -136,7 +157,6 @@ command = ["./target/release/goat-herdr", "toggle"]
 - Limit 4096 chars per message. Truncate the tail from the top.
 - 429 returns `parameters.retry_after`. Sleep it, retry once, then log and give up. One message per second per chat; 20 per minute per group.
 - `createForumTopic(chat_id, name)` returns `message_thread_id`. Name limit 128 chars. `closeForumTopic`, `reopenForumTopic` for pane lifecycle; `TOPIC_NOT_MODIFIED` means already in that state and counts as success. `message thread not found` means the topic was deleted; forget it and create again.
-- `getMe` at `test` time to confirm the token.
 - Blocked alerts carry an inline keyboard. When the pane tail shows a numbered dialog (`1. Yes`, `2. No`), each option is a button sending that digit plus Enter; a free-text option (`Type something`, `Other`, `Chat about`) sends the digit alone and the next text reply fills the field. Without a dialog the buttons are `y` and `n`. Every keyboard ends with `Enter`, `Esc`, `Tail`. A `callback_query` maps to `herdr pane send-keys` or `herdr pane read`; `answerCallbackQuery` closes the spinner and a line in the topic records what was sent.
 
 ## ntfy details
@@ -160,7 +180,7 @@ command = ["./target/release/goat-herdr", "toggle"]
 
 ## Bridge daemon
 
-`goat-herdr bridge --detach` forks, writes a pidfile in `STATE_DIR`, and exits so the startup hook returns. A second start finds the live pid and exits. The daemon long-polls `getUpdates` with `timeout = 30`, persists `offset`, and rejects any sender not in `allowed_user_ids`.
+`goat-herdr bridge --detach` starts the daemon in its own process group with output in `bridge.log`, and exits so the startup hook returns. The daemon holds `bridge.lock` and writes `bridge.pid`, long-polls `getUpdates` with `timeout = 25` on a client whose limit is 40 s, persists the update offset, and rejects any sender not in `allowed_user_ids`.
 
 | Input in a topic | Action |
 |---|---|
@@ -183,7 +203,7 @@ The daemon outlives the hook that started it (own process group). The startup ho
 3. Done. Topics: lazy create, state cache, close when the last pane exits, explicit reopen. Verified against a real forum supergroup.
 4. Done. Bridge: text replies, `/tail`, `/keys`, `/status`, `/agents`, inline keyboard with the dialog's numbered options. Verified on a real Claude Code pane: option press, free-text option plus typed reply, text prompt to an idle agent.
 5. Done. Slack incoming webhook sink and a generic JSON webhook sink, both verified with the `test` action and the received body read back.
-6. README, CI (fmt, clippy, test, build on three OSes).
+6. Done. README rewritten; CI runs fmt, clippy, test, release build, `cargo audit`, and markdownlint on Linux and macOS, the two platforms the manifest declares.
 
 ## Checks before each milestone closes
 

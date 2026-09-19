@@ -1,4 +1,4 @@
-.PHONY: all help build release test fmt fmt-check clippy md-lint hooks check clean
+.PHONY: all help build release test fmt fmt-check clippy audit md-lint hooks check clean
 
 all: check ## Default: run the local check suite
 
@@ -23,13 +23,16 @@ fmt-check: ## Fail if sources are not formatted
 clippy: ## Lint, warnings are errors
 	cargo clippy --all-targets -- -D warnings
 
+audit: ## Check dependencies against the RustSec advisory database (needs cargo-audit)
+	cargo audit
+
 md-lint: ## Lint markdown
 	markdownlint-cli2 "**/*.md" "#target"
 
 hooks: ## Install pre-commit hooks
 	pre-commit install
 
-check: fmt-check clippy test md-lint ## Local suite, same as CI
+check: fmt-check clippy test audit md-lint ## Local suite, same as CI
 
 clean: ## Remove build output
 	cargo clean
