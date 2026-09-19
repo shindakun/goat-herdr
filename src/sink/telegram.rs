@@ -32,6 +32,9 @@ pub struct Telegram {
 
 /// Seconds Telegram holds a getUpdates call open when nothing arrives.
 const POLL_TIMEOUT_SECS: u64 = 25;
+/// Calls slower than this are noted on stderr so the plugin log shows which
+/// one stalled.
+const SLOW_CALL: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// An API call that failed, with the error text Telegram returned so the
 /// caller can react to topic state.
@@ -106,7 +109,12 @@ impl Telegram {
             status: 0,
             description: err.replace(&self.token, "<token>"),
         };
+        let started = std::time::Instant::now();
         let mut response = client.post_json(&url, params).map_err(transport)?;
+        let elapsed = started.elapsed();
+        if elapsed > SLOW_CALL && method != "getUpdates" {
+            eprintln!("telegram {method}: took {}ms", elapsed.as_millis());
+        }
         if response.status == 429 {
             let wait = retry_after(&response.body).unwrap_or(1);
             if wait > MAX_RETRY_AFTER_SECS {
@@ -137,10 +145,11 @@ impl Telegram {
         match self.topics {
             TopicMode::None => None,
             TopicMode::PerAgent => Some(format!(
-                "{}|{}|{}",
+                "{}|{}|{}|{}",
                 alert.host,
                 alert.workspace_name(),
-                alert.agent
+                alert.agent,
+                alert.pane_id
             )),
             TopicMode::PerWorkspace => Some(format!("{}|{}", alert.host, alert.workspace_name())),
         }
@@ -150,10 +159,11 @@ impl Telegram {
         let name = match self.topics {
             TopicMode::PerWorkspace => format!("{} · {}", alert.workspace_name(), alert.host),
             _ => format!(
-                "{} · {} · {}",
+                "{} · {} · {} · {}",
                 alert.agent,
                 alert.workspace_name(),
-                alert.host
+                alert.host,
+                alert.pane_id
             ),
         };
         name.chars().take(MAX_TOPIC_NAME).collect()
@@ -225,15 +235,36 @@ impl Telegram {
         let pane = &alert.pane_id;
         let button =
             |label: &str, data: String| serde_json::json!({ "text": label, "callback_data": data });
-        Some(serde_json::json!({ "inline_keyboard": [
-            [
+        let mut rows: Vec<Vec<serde_json::Value>> = Vec::new();
+        let options = alert
+            .tail
+            .as_deref()
+            .map(numbered_options)
+            .unwrap_or_default();
+        if options.is_empty() {
+            rows.push(vec![
                 button("y", format!("k|{pane}|y|Enter")),
                 button("n", format!("k|{pane}|n|Enter")),
-                button("Enter", format!("k|{pane}|Enter")),
-                button("Esc", format!("k|{pane}|esc")),
-            ],
-            [button("Tail", format!("t|{pane}"))],
-        ] }))
+            ]);
+        } else {
+            // One option per row so the labels stay readable on a phone. A
+            // free-text option gets the digit only; the user's next reply
+            // fills the field.
+            for (number, label) in &options {
+                let data = if free_text_option(label) {
+                    format!("k|{pane}|{number}")
+                } else {
+                    format!("k|{pane}|{number}|Enter")
+                };
+                rows.push(vec![button(&format!("{number}. {label}"), data)]);
+            }
+        }
+        rows.push(vec![
+            button("Enter", format!("k|{pane}|Enter")),
+            button("Esc", format!("k|{pane}|esc")),
+            button("Tail", format!("t|{pane}")),
+        ]);
+        Some(serde_json::json!({ "inline_keyboard": rows }))
     }
 
     fn release_topic(&self, alert: &Alert) -> Result<(), String> {
@@ -315,8 +346,24 @@ impl Bridge for Telegram {
         let mut last_id = None;
         for update in &updates {
             last_id = update["update_id"].as_i64().or(last_id);
-            if let Some(inbound) = self.inbound_from(update) {
-                inbounds.push(inbound);
+            match self.inbound_from(update) {
+                Some(inbound) => inbounds.push(inbound),
+                None => {
+                    // Say what arrived and was dropped, without the message body.
+                    let keys: Vec<&str> = update
+                        .as_object()
+                        .map(|o| o.keys().map(String::as_str).collect())
+                        .unwrap_or_default();
+                    let chat = update
+                        .pointer("/message/chat/id")
+                        .or_else(|| update.pointer("/callback_query/message/chat/id"))
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null);
+                    eprintln!(
+                        "bridge telegram: dropped update {} kinds={keys:?} chat={chat}",
+                        update["update_id"]
+                    );
+                }
             }
         }
         if let Some(id) = last_id {
@@ -380,6 +427,41 @@ impl Telegram {
             callback_id: None,
         })
     }
+}
+
+/// Numbered choices in agent output, `1. Yes` style, as (number, label).
+/// Claude Code and Codex render their dialogs this way; a digit then Enter
+/// picks the option. Labels are cut to fit a button.
+fn numbered_options(tail: &str) -> Vec<(u8, String)> {
+    let mut options: Vec<(u8, String)> = Vec::new();
+    for line in tail.lines() {
+        let line = line.trim_start_matches(|c: char| c.is_whitespace() || c == '❯' || c == '>');
+        let Some((digit, rest)) = line.split_once(". ") else {
+            continue;
+        };
+        let Ok(number) = digit.trim().parse::<u8>() else {
+            continue;
+        };
+        if number == 0 || number > 9 || rest.trim().is_empty() {
+            continue;
+        }
+        // A dialog numbers from 1 without gaps; anything else is prose.
+        if number as usize != options.len() + 1 {
+            continue;
+        }
+        let label: String = rest.trim().chars().take(40).collect();
+        options.push((number, label));
+    }
+    if options.len() < 2 {
+        return Vec::new();
+    }
+    options
+}
+
+/// Dialog options that open a text field instead of answering.
+fn free_text_option(label: &str) -> bool {
+    let l = label.to_ascii_lowercase();
+    l.starts_with("type ") || l.starts_with("other") || l.starts_with("chat about")
 }
 
 fn retry_after(body: &str) -> Option<u64> {
@@ -513,7 +595,7 @@ mod tests {
         tg.send(&alert(None)).unwrap();
         let reqs = server.requests();
         assert_eq!(reqs[0].path, "/bot123:abc/createForumTopic");
-        assert_eq!(json(&reqs[0])["name"], "claude · ws <1> · box");
+        assert_eq!(json(&reqs[0])["name"], "claude · ws <1> · box · w1:p1");
         assert_eq!(reqs[1].path, "/bot123:abc/sendMessage");
         assert_eq!(json(&reqs[1])["message_thread_id"], 555);
         assert_eq!(reqs[2].path, "/bot123:abc/sendMessage");
@@ -625,7 +707,39 @@ mod tests {
         let body = json(&server.request());
         let rows = body["reply_markup"]["inline_keyboard"].as_array().unwrap();
         assert_eq!(rows[0][0]["callback_data"], "k|w1:p1|y|Enter");
-        assert_eq!(rows[1][0]["callback_data"], "t|w1:p1");
+        assert_eq!(rows[1][2]["callback_data"], "t|w1:p1");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn numbered_options_come_from_dialog_lines() {
+        let tail = "Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, and don't ask again\n   3. No, and tell Claude what to do differently\n\nEnter to select";
+        let options = numbered_options(tail);
+        assert_eq!(options.len(), 3);
+        assert_eq!(options[0], (1, "Yes".to_string()));
+        assert_eq!(options[2].0, 3);
+        assert!(numbered_options("step 1. build\nstep 2. ship").is_empty());
+        assert!(numbered_options("1. only one").is_empty());
+        assert!(numbered_options("2. starts at two\n3. three").is_empty());
+    }
+
+    #[test]
+    fn keyboard_offers_dialog_options_when_present() {
+        let server = Server::respond(200, OK);
+        let (state, dir) = temp_state("kb2");
+        let mut tg = sink(&server, TopicMode::None, state);
+        tg.bridge = true;
+        tg.send(&alert(Some(" ❯ 1. Yes\n   2. No\nEnter to select")))
+            .unwrap();
+        let body = json(&server.request());
+        let rows = body["reply_markup"]["inline_keyboard"].as_array().unwrap();
+        assert_eq!(rows[0][0]["text"], "1. Yes");
+        assert_eq!(rows[0][0]["callback_data"], "k|w1:p1|1|Enter");
+        assert_eq!(rows[1][0]["callback_data"], "k|w1:p1|2|Enter");
+        assert_eq!(rows[2][2]["callback_data"], "t|w1:p1");
+        assert!(free_text_option("Type something."));
+        assert!(free_text_option("Other"));
+        assert!(!free_text_option("Yes"));
         std::fs::remove_dir_all(dir).unwrap();
     }
 

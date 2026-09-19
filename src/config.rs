@@ -88,7 +88,8 @@ pub enum TopicMode {
     /// Everything in the chat root.
     #[default]
     None,
-    /// One topic per host, workspace, and agent.
+    /// One topic per agent pane: host, workspace, agent, and pane id. A
+    /// reply in the topic has exactly one place to go.
     PerAgent,
     /// One topic per host and workspace.
     PerWorkspace,

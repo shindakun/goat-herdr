@@ -18,7 +18,7 @@ Every alert answers three questions in its first line: which host, which workspa
 pane w3:p3
 ```
 
-Telegram routing uses forum topics. The chat is a supergroup with Topics on; the bot is an admin with Manage Topics. One topic per `(host, workspace, agent)`, or per `(host, workspace)` with `topics = "per-workspace"`. The workspace part drops Herdr's `[n]` ordinal prefix so a reorder does not split a project across topics. The plugin creates topics lazily with `createForumTopic`, caches `message_thread_id` in state, closes the topic when the last pane behind it closes, and reopens it when the same key returns. Telegram lets an admin bot post into a closed topic without error, so the plugin records which topics it closed and reopens them explicitly. Every `sendMessage` sets `message_thread_id`. The header line is always present, so a plain private chat works as well.
+Telegram routing uses forum topics. The chat is a supergroup with Topics on; the bot is an admin with Manage Topics. One topic per agent pane `(host, workspace, agent, pane id)`, so a reply in a topic has exactly one target; or per `(host, workspace)` with `topics = "per-workspace"`, shared by every agent in the workspace. Pane ids are per server session, so a restart gives an agent a new topic and the old one stays closed. The workspace part drops Herdr's `[n]` ordinal prefix so a reorder does not split a project across topics. The plugin creates topics lazily with `createForumTopic`, caches `message_thread_id` in state, closes the topic when the last pane behind it closes, and reopens it when the same key returns. Telegram lets an admin bot post into a closed topic without error, so the plugin records which topics it closed and reopens them explicitly. Every `sendMessage` sets `message_thread_id`. The header line is always present, so a plain private chat works as well.
 
 Two ways to run several hosts:
 
@@ -136,7 +136,7 @@ command = ["./target/release/goat-herdr", "toggle"]
 - 429 returns `parameters.retry_after`. Sleep it, retry once, then log and give up. One message per second per chat; 20 per minute per group.
 - `createForumTopic(chat_id, name)` returns `message_thread_id`. Name limit 128 chars. `closeForumTopic`, `reopenForumTopic` for pane lifecycle; `TOPIC_NOT_MODIFIED` means already in that state and counts as success. `message thread not found` means the topic was deleted; forget it and create again.
 - `getMe` at `test` time to confirm the token.
-- Blocked alerts carry an inline keyboard: `y`, `n`, `Enter`, `Tail`. A `callback_query` maps to `herdr agent send-keys` or `herdr agent read`. `answerCallbackQuery` closes the spinner.
+- Blocked alerts carry an inline keyboard. When the pane tail shows a numbered dialog (`1. Yes`, `2. No`), each option is a button sending that digit plus Enter; a free-text option (`Type something`, `Other`, `Chat about`) sends the digit alone and the next text reply fills the field. Without a dialog the buttons are `y` and `n`. Every keyboard ends with `Enter`, `Esc`, `Tail`. A `callback_query` maps to `herdr pane send-keys` or `herdr pane read`; `answerCallbackQuery` closes the spinner and a line in the topic records what was sent.
 
 ## ntfy details
 
@@ -150,21 +150,24 @@ command = ["./target/release/goat-herdr", "toggle"]
 
 | Input in a topic | Action |
 |---|---|
-| plain text | `herdr agent prompt <pane> "<text>"` |
-| `/tail [n]` | reply with `herdr agent read --lines n` |
-| `/keys <k>` | `herdr agent send-keys <pane> <k>` |
-| `/agents` (General topic) | `herdr agent list` |
+| plain text | `herdr agent prompt <pane> "<text>"`; when the agent is blocked, `pane send-text` plus Enter into the open dialog field |
+| `/tail [n]` | reply with `herdr pane read --lines n` |
+| `/keys <k>` | `herdr pane send-keys <pane> <k>` |
+| `/status` | this pane's row from `herdr agent list` |
+| `/agents` (anywhere) | `herdr agent list` |
 
-Topic to pane: state maps `message_thread_id` to `AgentKey`, then `AgentKey` to the current pane id by matching `herdr agent list` on workspace label and agent name. The key survives restarts.
+`herdr agent prompt` is the only call that submits Claude Code's main input box (bracketed paste, 300 ms, Enter). `pane send-keys Enter` after `pane send-text` leaves the main box unsubmitted, but does submit a dialog's text field. `agent prompt` and `agent send-keys` refuse panes Herdr has not classified as named agents; `pane send-keys` works on any pane.
 
-The daemon dies with the Herdr server. Startup hooks run again on a new server, so it comes back.
+Topic to pane: state maps `message_thread_id` to the routing key and the key to the panes that posted under it; the bridge keeps only panes present in `herdr agent list`, preferring a blocked one. With `per-agent` the key includes the pane id, so there is one candidate.
+
+The daemon outlives the hook that started it (own process group). The startup hook on a new server, or the `bridge` action, sends TERM to the pid in `bridge.pid`, waits for `bridge.lock`, and starts a fresh one. Poll failures back off 2 s per failure, capped at 10 s. Every handled or dropped input is one line in `bridge.log`; error text never contains a URL path, because Telegram's carries the bot token.
 
 ## Milestones
 
 1. Done. Scaffold, `notify` with the stdout sink, hook verified in a real Herdr, fixtures captured under `tests/fixtures/`.
 2. Done. Telegram sink without topics, ntfy sink, `test` sends to every sink, `toggle` pauses, debounce, tail on blocked alerts. Both sinks verified with a real blocked event and the message read back.
 3. Done. Topics: lazy create, state cache, close when the last pane exits, explicit reopen. Verified against a real forum supergroup.
-4. Bridge. Reply, `/tail`, inline keyboard.
+4. Done. Bridge: text replies, `/tail`, `/keys`, `/status`, `/agents`, inline keyboard with the dialog's numbered options. Verified on a real Claude Code pane: option press, free-text option plus typed reply, text prompt to an idle agent.
 5. Slack webhook sink.
 6. README, CI (fmt, clippy, test, build on three OSes).
 

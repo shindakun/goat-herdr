@@ -157,38 +157,46 @@ fn serve(bridge: Box<dyn Bridge>, env: &PluginEnv, state: &State) {
                         );
                         continue;
                     }
-                    if let Err(err) = handle(bridge.as_ref(), env, state, &inbound) {
-                        eprintln!("bridge {}: {err}", bridge.name());
-                        let _ = bridge.reply(&inbound, &format!("error: {err}"), false);
+                    match handle(bridge.as_ref(), env, state, &inbound) {
+                        Ok(done) => eprintln!("bridge {}: {done}", bridge.name()),
+                        Err(err) => {
+                            eprintln!("bridge {}: error: {err}", bridge.name());
+                            let _ = bridge.reply(&inbound, &format!("error: {err}"), false);
+                        }
                     }
                 }
             }
             Err(err) => {
                 failures += 1;
                 eprintln!("bridge {}: poll failed ({failures}): {err}", bridge.name());
-                std::thread::sleep(Duration::from_secs(failures.min(6) as u64 * 5));
+                // Short, capped back-off: a DNS blip should not cost half a minute.
+                std::thread::sleep(Duration::from_secs((failures as u64 * 2).min(10)));
             }
         }
     }
 }
 
-/// Runs one input against Herdr.
+/// Runs one input against Herdr. Returns a one-line record of what it did.
 fn handle(
     bridge: &dyn Bridge,
     env: &PluginEnv,
     state: &State,
     inbound: &Inbound,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let text = inbound.text.trim();
     if inbound.callback_id.is_some() {
         return handle_button(bridge, env, inbound, text);
     }
     let (command, rest) = split_command(text);
     match command.as_deref() {
-        Some("help") | Some("start") => bridge.reply(inbound, HELP, true),
+        Some("help") | Some("start") => {
+            bridge.reply(inbound, HELP, true)?;
+            Ok("help".to_string())
+        }
         Some("agents") => {
             let agents = env.agents()?;
-            bridge.reply(inbound, &agents_table(&agents), true)
+            bridge.reply(inbound, &agents_table(&agents), true)?;
+            Ok("agents".to_string())
         }
         Some("tail") => {
             let pane = target_pane(env, state, inbound)?;
@@ -198,20 +206,19 @@ fn handle(
                 inbound,
                 if tail.is_empty() { "(empty)" } else { &tail },
                 true,
-            )
+            )?;
+            Ok(format!("tail {lines} of {pane}"))
         }
         Some("keys") => {
             let keys: Vec<&str> = rest.split_whitespace().collect();
             if keys.is_empty() {
-                return bridge.reply(inbound, "usage: /keys k... (e.g. /keys y Enter)", false);
+                bridge.reply(inbound, "usage: /keys k... (e.g. /keys y Enter)", false)?;
+                return Ok("keys usage".to_string());
             }
             let pane = target_pane(env, state, inbound)?;
             env.send_keys(&pane, &keys)?;
-            bridge.reply(
-                inbound,
-                &format!("sent keys to {pane}: {}", keys.join(" ")),
-                false,
-            )
+            bridge.reply(inbound, &format!("{pane} ← {}", keys.join(" ")), false)?;
+            Ok(format!("keys {} -> {pane}", keys.join(" ")))
         }
         Some("status") => {
             let pane = target_pane(env, state, inbound)?;
@@ -221,20 +228,25 @@ fn handle(
                 .filter(|a| a.pane_id == pane)
                 .cloned()
                 .collect::<Vec<_>>();
-            bridge.reply(inbound, &agents_table(&row), true)
+            bridge.reply(inbound, &agents_table(&row), true)?;
+            Ok(format!("status of {pane}"))
         }
-        Some(other) => bridge.reply(
-            inbound,
-            &format!("unknown command /{other}\n\n{HELP}"),
-            true,
-        ),
+        Some(other) => {
+            bridge.reply(
+                inbound,
+                &format!("unknown command /{other}\n\n{HELP}"),
+                true,
+            )?;
+            Ok(format!("unknown command /{other}"))
+        }
         None => {
             if text.is_empty() {
-                return Ok(());
+                return Ok("empty".to_string());
             }
             let pane = target_pane(env, state, inbound)?;
             let how = env.agent_prompt(&pane, text)?;
-            bridge.reply(inbound, &format!("{how} {pane}"), false)
+            bridge.reply(inbound, &format!("{how} {pane} ← {text}"), false)?;
+            Ok(format!("{how} {pane}, {} chars", text.chars().count()))
         }
     }
 }
@@ -245,20 +257,30 @@ fn handle_button(
     env: &PluginEnv,
     inbound: &Inbound,
     data: &str,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let mut parts = data.split('|');
     let (Some(kind), Some(pane)) = (parts.next(), parts.next()) else {
-        return bridge.ack(inbound, "bad button");
+        bridge.ack(inbound, "bad button")?;
+        return Ok(format!("bad button {data}"));
     };
     let alive = env.agents()?.iter().any(|a| a.pane_id == pane);
     if !alive {
-        return bridge.ack(inbound, &format!("{pane} is gone"));
+        bridge.ack(inbound, &format!("{pane} is gone"))?;
+        return Ok(format!("button for gone pane {pane}"));
     }
     match kind {
         "k" => {
             let keys: Vec<&str> = parts.collect();
             env.send_keys(pane, &keys)?;
-            bridge.ack(inbound, &format!("sent {}", keys.join(" ")))
+            // The toast is easy to miss; leave a line in the topic too.
+            bridge.ack(inbound, &format!("sent {}", keys.join(" ")))?;
+            let line = if keys.len() == 1 && keys[0].chars().all(|c| c.is_ascii_digit()) {
+                format!("{pane} ← {}. Now send your text as a reply.", keys[0])
+            } else {
+                format!("{pane} ← {}", keys.join(" "))
+            };
+            bridge.reply(inbound, &line, false)?;
+            Ok(format!("button keys {} -> {pane}", keys.join(" ")))
         }
         "t" => {
             let tail = env.read_tail(pane, 40)?;
@@ -267,9 +289,13 @@ fn handle_button(
                 inbound,
                 if tail.is_empty() { "(empty)" } else { &tail },
                 true,
-            )
+            )?;
+            Ok(format!("button tail of {pane}"))
         }
-        _ => bridge.ack(inbound, "bad button"),
+        _ => {
+            bridge.ack(inbound, "bad button")?;
+            Ok(format!("bad button {data}"))
+        }
     }
 }
 

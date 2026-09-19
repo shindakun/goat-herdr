@@ -55,18 +55,24 @@ impl PluginEnv {
         Ok(envelope.result.agents)
     }
 
-    /// Gives text to an agent. `agent prompt` knows each agent's submit
-    /// rules but refuses a blocked agent ("requires interactive input") and
-    /// panes Herdr has not classified as a named agent; those get the text
-    /// typed in followed by Enter, which is what a blocked prompt wants.
+    /// Gives text to an agent. Idle or working: `agent prompt`, which knows
+    /// each agent's submit sequence (bracketed paste, a pause, then Enter)
+    /// and is the only thing that submits Claude Code's main input box.
+    /// Blocked: a dialog is open, `agent prompt` refuses, and the text is
+    /// typed into the dialog's field followed by Enter, which submits a
+    /// free-text option (verified on Claude Code's AskUserQuestion).
     pub fn agent_prompt(&self, pane_id: &str, text: &str) -> Result<&'static str, String> {
         match self.run(&["agent", "prompt", pane_id, text]) {
             Ok(_) => Ok("prompted"),
-            Err(err) if err.contains("agent_blocked") || err.contains("agent_not_ready") => {
+            Err(err) if err.contains("agent_blocked") => {
                 self.run(&["pane", "send-text", pane_id, text])?;
+                std::thread::sleep(std::time::Duration::from_millis(300));
                 self.send_keys(pane_id, &["Enter"])?;
-                Ok("typed")
+                Ok("typed into the open dialog of")
             }
+            Err(err) if err.contains("agent_not_ready") => Err(format!(
+                "{pane_id} is not a named agent; use /keys to type into it"
+            )),
             Err(err) => Err(err),
         }
     }

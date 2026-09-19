@@ -69,7 +69,8 @@ impl Alert {
         config: &Config,
     ) -> Option<Self> {
         let status = match event.event.as_str() {
-            "pane_closed" => Status::Closed,
+            // A pane whose process ends fires pane_exited, not pane_closed.
+            "pane_closed" | "pane_exited" => Status::Closed,
             "pane_agent_status_changed" => Status::parse(event.data.agent_status.as_deref()?),
             _ => return None,
         };
@@ -201,6 +202,15 @@ mod tests {
             herdr::parse_event(&STATUS_EVENT.replace(r#""blocked""#, r#""working""#)).unwrap();
         let context = herdr::parse_context(STATUS_CONTEXT).unwrap();
         assert!(Alert::from_event(&event, &context, &config()).is_none());
+    }
+
+    #[test]
+    fn pane_exited_is_treated_as_closed() {
+        let event =
+            herdr::parse_event(&CLOSED_EVENT.replace("pane_closed", "pane_exited")).unwrap();
+        let context = herdr::parse_context(CLOSED_CONTEXT).unwrap();
+        let alert = Alert::from_event(&event, &context, &config()).unwrap();
+        assert_eq!(alert.status, Status::Closed);
     }
 
     #[test]

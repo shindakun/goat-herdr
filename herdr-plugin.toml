@@ -16,6 +16,10 @@ command = ["./target/release/goat-herdr", "notify"]
 on = "pane.closed"
 command = ["./target/release/goat-herdr", "notify"]
 
+[[events]]
+on = "pane.exited"
+command = ["./target/release/goat-herdr", "notify"]
+
 [[startup]]
 command = ["./target/release/goat-herdr", "bridge", "--detach"]
 

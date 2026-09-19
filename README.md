@@ -2,7 +2,7 @@
 
 A [Herdr](https://herdr.dev) plugin that alerts you when an agent needs you. Telegram and ntfy, with a seam for more.
 
-Status: alerts work. Telegram with forum topics, and ntfy. The two-way bridge is next. See [docs/PLAN.md](docs/PLAN.md).
+Status: alerts and the two-way Telegram bridge work. Telegram with forum topics, and ntfy. See [docs/PLAN.md](docs/PLAN.md).
 
 ## Install
 
@@ -56,7 +56,7 @@ TELEGRAM_BOT_TOKEN=123456:abc...
 
 Telegram setup: create a bot with @BotFather, start a chat with it (or add it to a group), then get the chat id from `https://api.telegram.org/bot<token>/getUpdates` after sending it a message.
 
-Topics need a supergroup with Topics turned on and the bot as an admin with Manage Topics. `per-agent` gives one topic per host, workspace, and agent (`claude · goat-herdr · mac-mini`); `per-workspace` one per host and workspace. The plugin creates topics as agents first alert, closes a topic when its last pane closes, and reopens it when the agent comes back. `none` posts everything to the chat root.
+Topics need a supergroup with Topics turned on and the bot as an admin with Manage Topics. `per-agent` gives one topic per agent pane (`claude · goat-herdr · mac-mini · w3:p16`), so a reply in a topic reaches exactly that agent; `per-workspace` one per host and workspace, shared by every agent in it. The plugin creates a topic on the first alert, closes it when the pane closes, and reopens it if the same pane alerts again. `none` posts everything to the chat root.
 
 Every alert leads with host, workspace, and agent, so one chat can carry several machines:
 
@@ -66,7 +66,24 @@ pane w3:p3
 <last 30 lines of the pane>
 ```
 
-Actions: `shindakun.goat-herdr.test` sends a test alert to every sink; `shindakun.goat-herdr.toggle` pauses and resumes alerts. Bind either with a `plugin_action` key in your Herdr config.
+## Bridge
+
+With `topics = "per-agent"                   # none | per-agent | per-workspace
+bridge = true                          # two-way: reply in a topic to prompt that agent
+allowed_user_ids = [123456789]         # your Telegram user id; required for the bridge
+` and your Telegram user id in `allowed_user_ids`, the startup hook runs a small daemon that polls the bot. In an agent's topic:
+
+| You send | It does |
+|---|---|
+| plain text | prompts the agent; if the agent is waiting on a dialog, types it into the dialog's text field |
+| a button under a blocked alert | picks that numbered option, or `Enter`, `Esc`, or posts the pane `Tail` |
+| `/tail [n]` | posts the last n lines of the pane |
+| `/keys y Enter` | sends key presses |
+| `/status`, `/agents` | agent state |
+
+Input from anyone not in `allowed_user_ids` is ignored. The bridge log is `bridge.log` in the plugin's state directory.
+
+Actions: `shindakun.goat-herdr.test` sends a test alert to every sink; `shindakun.goat-herdr.toggle` pauses and resumes alerts; `shindakun.goat-herdr.bridge` restarts the bridge. Bind any with a `plugin_action` key in your Herdr config.
 
 ## License
 
