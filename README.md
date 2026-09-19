@@ -80,7 +80,18 @@ With `bridge = true` and your Telegram user id in `allowed_user_ids`, the startu
 | `/keys y Enter` | sends key presses |
 | `/status`, `/agents` | agent state |
 
-Input from anyone not in `allowed_user_ids` is ignored. The bridge log is `bridge.log` in the plugin's state directory.
+The bridge log is `bridge.log` in the plugin's state directory.
+
+## Security
+
+The bridge lets a chat message drive a terminal on your machine, so it is strict about who it listens to.
+
+- Only Telegram user ids listed in `allowed_user_ids` are accepted. Everyone else is logged as `ignored user <id>` and dropped: nothing reaches Herdr, nothing is replied. An empty list accepts nobody.
+- Only updates from the configured `chat_id` are read. Other chats are dropped.
+- Telegram user ids are not secret, so this is "only this account", not a password. Keep the group private and add only people you would hand a shell to.
+- The bot token is the real credential. Anyone with it can read the group and post as the bot, and with the bot's admin rights create and close topics. Keep it in `.env` in the plugin config directory (mode 600), never in the plugin root or the repo. The plugin never writes the token to its logs or error messages; if it ever leaks, revoke it in @BotFather.
+- Blocked alerts include the last lines of the agent's terminal. Whatever is on screen goes to the chat, so do not point the plugin at a group you would not paste your terminal into.
+- Alerts and the bridge go over HTTPS to `api.telegram.org` and your ntfy server. Nothing else is contacted.
 
 Actions: `shindakun.goat-herdr.test` sends a test alert to every sink; `shindakun.goat-herdr.toggle` pauses and resumes alerts; `shindakun.goat-herdr.bridge` restarts the bridge. Bind any with a `plugin_action` key in your Herdr config.
 
