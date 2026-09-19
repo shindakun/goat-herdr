@@ -1,6 +1,6 @@
 id = "shindakun.goat-herdr"
 name = "Goat Herdr"
-version = "0.1.0"
+version = "0.1.1"
 min_herdr_version = "0.9.0"
 description = "Alerts when an agent needs you. Telegram with a two-way bridge, ntfy, Slack, JSON webhook."
 platforms = ["linux", "macos"]
