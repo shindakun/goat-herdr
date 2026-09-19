@@ -5,6 +5,7 @@ mod ntfy;
 mod slack;
 mod stdout;
 mod telegram;
+mod webhook;
 
 use std::path::Path;
 
@@ -45,6 +46,7 @@ pub fn build(config: &Config, state_dir: &Path) -> Result<Vec<Box<dyn Sink>>, St
                 )?)),
                 SinkConfig::Ntfy(cfg) => Ok(Box::new(ntfy::Ntfy::new(cfg, config)?)),
                 SinkConfig::Slack(cfg) => Ok(Box::new(slack::Slack::new(cfg, config)?)),
+                SinkConfig::Webhook(cfg) => Ok(Box::new(webhook::Webhook::new(cfg, config)?)),
             }
         })
         .collect()

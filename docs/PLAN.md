@@ -70,6 +70,7 @@ goat-herdr/
     sink/telegram.rs
     sink/ntfy.rs
     sink/slack.rs
+    sink/webhook.rs     # generic JSON POST
     sink/stdout.rs      # for tests and dry runs
   tests/fixtures/       # real HERDR_PLUGIN_EVENT_JSON captures
 ```
@@ -144,6 +145,12 @@ command = ["./target/release/goat-herdr", "toggle"]
 - Topic name is the URL. Host and agent identity ride in `Title` and the first body line, same text as Telegram.
 - One-way. ntfy has no reply path back to Herdr.
 
+## Generic webhook details
+
+- `POST <url>` with `Content-Type: application/json`. Body: `source`, `status`, `host`, `workspace`, `agent`, `pane_id`, `headline`, `tail` (null when absent), `text` (the plain rendering). The README carries the example document.
+- Any 2xx is delivered; otherwise the error carries the status and the first 200 chars of the body. No retry.
+- No headers or auth; a secret rides in the URL through `url_env`. One-way.
+
 ## Slack details
 
 - `POST <webhook_url>` with `{"text": ...}` in mrkdwn: bold headline, pane line, tail in a code block cut to 3,000 chars from the top, ``` inside the tail replaced so it cannot close the block.
@@ -175,7 +182,7 @@ The daemon outlives the hook that started it (own process group). The startup ho
 2. Done. Telegram sink without topics, ntfy sink, `test` sends to every sink, `toggle` pauses, debounce, tail on blocked alerts. Both sinks verified with a real blocked event and the message read back.
 3. Done. Topics: lazy create, state cache, close when the last pane exits, explicit reopen. Verified against a real forum supergroup.
 4. Done. Bridge: text replies, `/tail`, `/keys`, `/status`, `/agents`, inline keyboard with the dialog's numbered options. Verified on a real Claude Code pane: option press, free-text option plus typed reply, text prompt to an idle agent.
-5. Done. Slack incoming webhook sink, verified with the `test` action.
+5. Done. Slack incoming webhook sink and a generic JSON webhook sink, both verified with the `test` action and the received body read back.
 6. README, CI (fmt, clippy, test, build on three OSes).
 
 ## Checks before each milestone closes

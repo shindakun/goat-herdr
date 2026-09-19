@@ -1,8 +1,8 @@
 # goat-herdr
 
-A [Herdr](https://herdr.dev) plugin that alerts you when an agent needs you. Telegram, ntfy, and Slack, with a seam for more.
+A [Herdr](https://herdr.dev) plugin that alerts you when an agent needs you. Telegram, ntfy, Slack, and a generic JSON webhook.
 
-Status: alerts and the two-way Telegram bridge work. Telegram with forum topics, ntfy, and Slack incoming webhooks. See [docs/PLAN.md](docs/PLAN.md).
+Status: alerts and the two-way Telegram bridge work. Telegram with forum topics, ntfy, Slack incoming webhooks, and a generic JSON webhook. See [docs/PLAN.md](docs/PLAN.md).
 
 ## Install
 
@@ -52,6 +52,10 @@ token_env = "NTFY_TOKEN"               # optional
 [[sinks]]
 type = "slack"
 webhook_url_env = "SLACK_WEBHOOK_URL"  # or webhook_url = "https://hooks.slack.com/services/..."
+
+[[sinks]]
+type = "webhook"
+url = "https://example.com/hook"       # or url_env = "MY_HOOK_URL" when the URL is a secret
 ```
 
 Put secrets in `.env` next to `config.toml`:
@@ -62,6 +66,26 @@ SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 ```
 
 Slack setup: at api.slack.com/apps create an app from a manifest with the `incoming-webhook` bot scope, open Incoming Webhooks, add a webhook to the channel you want, and copy its URL. The URL is the credential. Slack is one-way; there is no bridge.
+
+### Generic webhook
+
+`type = "webhook"` POSTs one JSON document per alert, `Content-Type: application/json`, to the URL. Any 2xx response counts as delivered. Pane closes are not sent. There are no headers or auth options; a secret goes in the URL through `url_env`.
+
+```json
+{
+  "source": "goat-herdr",
+  "status": "blocked",
+  "host": "mac-mini",
+  "workspace": "goat-herdr",
+  "agent": "claude",
+  "pane_id": "w3:p18",
+  "headline": "BLOCKED claude · goat-herdr · mac-mini",
+  "tail": "last lines of the pane, or null",
+  "text": "🟥 BLOCKED claude · goat-herdr · mac-mini\npane w3:p18\n---\nlast lines of the pane"
+}
+```
+
+`status` is one of `blocked`, `done`, `idle`, `working`, `unknown`. `tail` is present on blocked alerts when `tail_lines` is above zero. `text` is the same plain rendering ntfy and the plugin log get, for receivers that only want to display something.
 
 Telegram setup: create a bot with @BotFather, start a chat with it (or add it to a group), then get the chat id from `https://api.telegram.org/bot<token>/getUpdates` after sending it a message.
 
