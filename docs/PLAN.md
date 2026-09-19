@@ -67,6 +67,7 @@ goat-herdr/
   herdr-plugin.toml
   Cargo.toml
   Makefile              # check: fmt clippy test audit md-lint
+  scripts/release.sh    # bump, check, tag, push, GitHub release
   src/
     main.rs             # subcommands: notify, bridge, test, toggle
     herdr.rs            # env + JSON parsing; wrapper over HERDR_BIN_PATH
@@ -222,8 +223,8 @@ Run every line. A line that cannot be run blocks the release.
 4. A real agent, not `report-agent`: start `claude` in a pane, give it a prompt that asks a question, confirm the blocked alert arrives with the pane tail.
 5. Restart the Herdr server and confirm the startup hook logs a success in `herdr plugin log list`.
 6. README matches the config the release accepts: every key in `config.rs` is documented, no key in the docs is unimplemented.
-7. `CHANGELOG.md` has the version and date. `version` in `Cargo.toml` and `herdr-plugin.toml` match.
-8. Tag `vX.Y.Z`, push the tag, confirm the marketplace card shows the new version within an hour.
+7. `CHANGELOG.md` has a `## X.Y.Z (date)` section, committed.
+8. `scripts/release.sh X.Y.Z`: bumps both manifests and the lockfile, runs the checks, commits, tags, pushes, publishes the GitHub release. Then confirm the marketplace card shows the new version within an hour.
 
 ## Windows
 

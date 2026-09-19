@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `scripts/release.sh` bumps the version, checks, tags, pushes, and publishes the GitHub release.
+
 ## 0.1.0 (2026-09-19)
 
 First release.
