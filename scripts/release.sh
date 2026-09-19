@@ -24,8 +24,9 @@ git fetch -q origin main
 grep -q "^## $version (" CHANGELOG.md || { echo "CHANGELOG.md has no '## $version (' section" >&2; exit 1; }
 
 # Version lives in two manifests plus the lockfile.
-sed -i.bak -E "0,/^version = \"[^\"]+\"/s//version = \"$version\"/" Cargo.toml && rm Cargo.toml.bak
-sed -i.bak -E "s/^version = \"[^\"]+\"/version = \"$version\"/" herdr-plugin.toml && rm herdr-plugin.toml.bak
+# First "version =" line only; BSD sed has no 0,/re/ address, so perl.
+perl -pi -e 'BEGIN { $v = shift } if (!$done && s/^version = "[^"]+"/version = "$v"/) { $done = 1 }' "$version" Cargo.toml
+perl -pi -e 'BEGIN { $v = shift } s/^version = "[^"]+"/version = "$v"/' "$version" herdr-plugin.toml
 cargo update -q --workspace
 grep -q "^version = \"$version\"" Cargo.toml herdr-plugin.toml
 grep -A1 '^name = "goat-herdr"' Cargo.lock | grep -q "version = \"$version\""
