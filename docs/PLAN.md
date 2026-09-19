@@ -144,6 +144,13 @@ command = ["./target/release/goat-herdr", "toggle"]
 - Topic name is the URL. Host and agent identity ride in `Title` and the first body line, same text as Telegram.
 - One-way. ntfy has no reply path back to Herdr.
 
+## Slack details
+
+- `POST <webhook_url>` with `{"text": ...}` in mrkdwn: bold headline, pane line, tail in a code block cut to 3,000 chars from the top, ``` inside the tail replaced so it cannot close the block.
+- The webhook URL is the credential and sits in the path; errors carry only the status and Slack's body.
+- 429 means one post per second per webhook; sleep one second and retry once.
+- One-way.
+
 ## Bridge daemon
 
 `goat-herdr bridge --detach` forks, writes a pidfile in `STATE_DIR`, and exits so the startup hook returns. A second start finds the live pid and exits. The daemon long-polls `getUpdates` with `timeout = 30`, persists `offset`, and rejects any sender not in `allowed_user_ids`.
@@ -168,7 +175,7 @@ The daemon outlives the hook that started it (own process group). The startup ho
 2. Done. Telegram sink without topics, ntfy sink, `test` sends to every sink, `toggle` pauses, debounce, tail on blocked alerts. Both sinks verified with a real blocked event and the message read back.
 3. Done. Topics: lazy create, state cache, close when the last pane exits, explicit reopen. Verified against a real forum supergroup.
 4. Done. Bridge: text replies, `/tail`, `/keys`, `/status`, `/agents`, inline keyboard with the dialog's numbered options. Verified on a real Claude Code pane: option press, free-text option plus typed reply, text prompt to an idle agent.
-5. Slack webhook sink.
+5. Done. Slack incoming webhook sink, verified with the `test` action.
 6. README, CI (fmt, clippy, test, build on three OSes).
 
 ## Checks before each milestone closes

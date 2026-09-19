@@ -2,6 +2,7 @@
 //! instances. Adding a service means one file here and one match arm below.
 
 mod ntfy;
+mod slack;
 mod stdout;
 mod telegram;
 
@@ -43,6 +44,7 @@ pub fn build(config: &Config, state_dir: &Path) -> Result<Vec<Box<dyn Sink>>, St
                     State::new(state_dir),
                 )?)),
                 SinkConfig::Ntfy(cfg) => Ok(Box::new(ntfy::Ntfy::new(cfg, config)?)),
+                SinkConfig::Slack(cfg) => Ok(Box::new(slack::Slack::new(cfg, config)?)),
             }
         })
         .collect()

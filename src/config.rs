@@ -56,6 +56,16 @@ pub enum SinkConfig {
     Stdout,
     Telegram(TelegramConfig),
     Ntfy(NtfyConfig),
+    Slack(SlackConfig),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SlackConfig {
+    #[serde(default)]
+    pub webhook_url: Option<String>,
+    #[serde(default)]
+    pub webhook_url_env: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -231,6 +241,10 @@ allowed_user_ids = [42]
 [[sinks]]
 type = "ntfy"
 url = "https://ntfy.sh/goats"
+
+[[sinks]]
+type = "slack"
+webhook_url_env = "SLACK_WEBHOOK_URL"
 "#,
         )
         .unwrap();
@@ -247,6 +261,7 @@ url = "https://ntfy.sh/goats"
             other => panic!("expected telegram, got {other:?}"),
         }
         assert!(matches!(config.sinks[2], SinkConfig::Ntfy(_)));
+        assert!(matches!(config.sinks[3], SinkConfig::Slack(_)));
     }
 
     #[test]
