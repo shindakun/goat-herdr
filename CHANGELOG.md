@@ -1,0 +1,11 @@
+# Changelog
+
+## 0.1.0 (2026-09-19)
+
+First release.
+
+- Alerts on `pane.agent_status_changed` for the configured states, with host, workspace, agent, pane, and the last lines of the pane on blocked alerts. Debounce per pane and state. Pause and resume with the `toggle` action.
+- Sinks: Telegram (HTML, forum topics per agent pane or per workspace), ntfy, Slack incoming webhook, generic JSON webhook, stdout.
+- Telegram bridge: a detached daemon that turns topic replies into `herdr agent prompt`, dialog options into buttons, and `/tail`, `/keys`, `/status`, `/agents` into Herdr calls. Input is accepted only from `allowed_user_ids` in the configured chat.
+- Secrets in `.env` beside `config.toml`; error text never includes a URL path.
+- Linux and macOS.
