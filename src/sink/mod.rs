@@ -1,6 +1,7 @@
 //! Delivery targets. One module per service; `build` maps config entries to
 //! instances. Adding a service means one file here and one match arm below.
 
+mod desktop;
 mod discord;
 mod ntfy;
 mod pushbullet;
@@ -55,6 +56,7 @@ pub fn build(config: &Config, state_dir: &Path) -> Result<Vec<Box<dyn Sink>>, St
                     Ok(Box::new(pushbullet::Pushbullet::new(cfg, config)?))
                 }
                 SinkConfig::Pushover(cfg) => Ok(Box::new(pushover::Pushover::new(cfg, config)?)),
+                SinkConfig::Desktop(cfg) => Ok(Box::new(desktop::Desktop::new(cfg))),
             }
         })
         .collect()

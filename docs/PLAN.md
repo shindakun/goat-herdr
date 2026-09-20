@@ -1,6 +1,6 @@
 # goat-herdr
 
-A Herdr plugin that alerts you when an agent needs you. Rust. One binary. Sinks are modules: Telegram (with a two-way bridge), Discord, ntfy, Pushover, Pushbullet, Slack, and a generic JSON webhook.
+A Herdr plugin that alerts you when an agent needs you. Rust. One binary. Sinks are modules: Telegram (with a two-way bridge), Discord, ntfy, Pushover, Pushbullet, Slack, a generic JSON webhook, and a desktop banner.
 
 ## What it does
 
@@ -84,6 +84,7 @@ goat-herdr/
     sink/discord.rs     # webhook or bot token + channel
     sink/pushover.rs
     sink/pushbullet.rs
+    sink/desktop.rs     # osascript on macOS, notify-send on Linux
     sink/stdout.rs      # for tests and dry runs
   tests/fixtures/       # real HERDR_PLUGIN_EVENT_JSON captures
 ```
@@ -195,6 +196,12 @@ command = ["./target/release/goat-herdr", "bridge", "--detach"]
 - `POST https://api.pushbullet.com/v2/pushes` with `Access-Token` header and `{"type": "note", "title", "body"}`.
 - Errors carry `error.message`.
 - One-way.
+
+## Desktop details
+
+- macOS: `osascript -e 'display notification "<body>" with title "<headline>" sound name "<sound>"'`. Backslash and double quote are escaped inside the AppleScript literals. The banner is attributed to Script Editor.
+- Linux: `notify-send -a goat-herdr -u <urgency> <headline> <body>`; urgency critical, normal, or low by state.
+- Body is the pane line plus the last two non-empty tail lines. Exit status non-zero is the error, with stderr.
 
 ## Slack details
 

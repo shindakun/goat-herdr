@@ -61,6 +61,15 @@ pub enum SinkConfig {
     Discord(DiscordConfig),
     Pushbullet(PushbulletConfig),
     Pushover(PushoverConfig),
+    Desktop(DesktopConfig),
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DesktopConfig {
+    /// macOS system sound name, for example "Ping". Ignored on Linux.
+    #[serde(default)]
+    pub sound: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -335,6 +344,10 @@ token_env = "PUSHBULLET_TOKEN"
 type = "pushover"
 app_token_env = "PUSHOVER_TOKEN"
 user_key_env = "PUSHOVER_USERKEY"
+
+[[sinks]]
+type = "desktop"
+sound = "Ping"
 "#,
         )
         .unwrap();
@@ -361,6 +374,10 @@ user_key_env = "PUSHOVER_USERKEY"
         }
         assert!(matches!(config.sinks[6], SinkConfig::Pushbullet(_)));
         assert!(matches!(config.sinks[7], SinkConfig::Pushover(_)));
+        match &config.sinks[8] {
+            SinkConfig::Desktop(d) => assert_eq!(d.sound.as_deref(), Some("Ping")),
+            other => panic!("expected desktop, got {other:?}"),
+        }
     }
 
     #[test]

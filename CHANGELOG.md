@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Desktop sink: `osascript` banner on macOS, `notify-send` on Linux.
+
 ## 0.3.0 (2026-09-19)
 
 - Pushover sink (application token plus user key, priority by state).

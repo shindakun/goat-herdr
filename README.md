@@ -1,6 +1,6 @@
 # goat-herdr
 
-A [Herdr](https://herdr.dev) plugin that alerts you when an agent needs you. Telegram, Discord, ntfy, Pushover, Pushbullet, Slack, or any JSON webhook. From Telegram you can answer the agent.
+A [Herdr](https://herdr.dev) plugin that alerts you when an agent needs you. Telegram, Discord, ntfy, Pushover, Pushbullet, Slack, any JSON webhook, or a desktop banner. From Telegram you can answer the agent.
 
 - An agent goes `blocked` or `done`: one message, with the host, workspace, agent, pane, and the last lines of its terminal.
 - Telegram forum topics give each agent pane its own thread.
@@ -58,6 +58,10 @@ user_key_env = "PUSHOVER_USERKEY"      # your user key from the Pushover dashboa
 [[sinks]]
 type = "pushbullet"
 token_env = "PUSHBULLET_TOKEN"         # access token from pushbullet.com/#settings/account
+
+[[sinks]]
+type = "desktop"
+sound = "Ping"                         # macOS system sound; optional
 ```
 
 Any `*_env` key names a variable that is read from `.env` next to `config.toml` first, then from the environment. Keep secrets there:
@@ -120,6 +124,10 @@ One message per alert to every device on the account. Needs two secrets: an appl
 
 One note per alert to every device on the account. Needs the access token from pushbullet.com, Settings → Account → Create Access Token. The title is the headline; the body is the plain rendering. One-way.
 
+### Desktop
+
+A notification banner on the machine running Herdr. macOS: `osascript` with `display notification`; the banner comes from Script Editor, so allow Script Editor under System Settings → Notifications if nothing shows. `sound` names a system sound. Linux: `notify-send`, urgency `critical` for blocked, `normal` for done, `low` otherwise. Title is the headline; body is the pane and the last two lines of the tail. No network.
+
 ### Slack
 
 At api.slack.com/apps create an app from a manifest with the `incoming-webhook` bot scope, open Incoming Webhooks, add a webhook to a channel, and copy the URL. One POST per alert in mrkdwn with the tail in a code block. The URL is the credential. One-way.
@@ -146,7 +154,7 @@ One JSON POST per alert, `Content-Type: application/json`. Any 2xx is delivered.
 
 ### Adding one
 
-A sink is one file under `src/sink/` with a `name` and a `send`, plus one match arm in `src/sink/mod.rs` and a config struct. `ntfy.rs` is the template. Services with the same shape, an HTTP POST and a token: Mattermost (Slack-compatible webhook), Microsoft Teams (workflow webhook), Gotify, Matrix (a room webhook bot), and a desktop notifier (`osascript` on macOS, `notify-send` on Linux). Anything the `apprise` CLI covers can be reached by shelling out to it.
+A sink is one file under `src/sink/` with a `name` and a `send`, plus one match arm in `src/sink/mod.rs` and a config struct. `ntfy.rs` is the template. Services with the same shape, an HTTP POST and a token: Mattermost (Slack-compatible webhook), Microsoft Teams (workflow webhook), Gotify, Matrix (a room webhook bot). Anything the `apprise` CLI covers can be reached by shelling out to it, the way the desktop sink shells out.
 
 ## Bridge
 
