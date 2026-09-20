@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Pushover sink (application token plus user key, priority by state).
+- Pushbullet sink (access token).
+
 ## 0.2.0 (2026-09-19)
 
 - Discord sink: channel webhook, or bot token plus channel id. Posting only; the bridge design is in `TODO.md`.

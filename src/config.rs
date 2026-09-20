@@ -59,6 +59,36 @@ pub enum SinkConfig {
     Slack(SlackConfig),
     Webhook(WebhookConfig),
     Discord(DiscordConfig),
+    Pushbullet(PushbulletConfig),
+    Pushover(PushoverConfig),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PushbulletConfig {
+    #[serde(default)]
+    pub token: Option<String>,
+    #[serde(default)]
+    pub token_env: Option<String>,
+    /// Override for tests.
+    #[serde(default = "default_pushbullet_api")]
+    pub api_url: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PushoverConfig {
+    #[serde(default)]
+    pub app_token: Option<String>,
+    #[serde(default)]
+    pub app_token_env: Option<String>,
+    #[serde(default)]
+    pub user_key: Option<String>,
+    #[serde(default)]
+    pub user_key_env: Option<String>,
+    /// Override for tests.
+    #[serde(default = "default_pushover_api")]
+    pub api_url: String,
 }
 
 /// Either a channel webhook, or a bot token plus the channel it posts to.
@@ -221,6 +251,14 @@ fn default_tail_lines() -> u32 {
     30
 }
 
+fn default_pushbullet_api() -> String {
+    "https://api.pushbullet.com".to_string()
+}
+
+fn default_pushover_api() -> String {
+    "https://api.pushover.net".to_string()
+}
+
 fn default_discord_api() -> String {
     "https://discord.com/api/v10".to_string()
 }
@@ -288,6 +326,15 @@ url = "https://example.test/hook"
 type = "discord"
 bot_token_env = "DISCORD_BOT_TOKEN"
 channel_id = "186985279377113088"
+
+[[sinks]]
+type = "pushbullet"
+token_env = "PUSHBULLET_TOKEN"
+
+[[sinks]]
+type = "pushover"
+app_token_env = "PUSHOVER_TOKEN"
+user_key_env = "PUSHOVER_USERKEY"
 "#,
         )
         .unwrap();
@@ -312,6 +359,8 @@ channel_id = "186985279377113088"
             }
             other => panic!("expected discord, got {other:?}"),
         }
+        assert!(matches!(config.sinks[6], SinkConfig::Pushbullet(_)));
+        assert!(matches!(config.sinks[7], SinkConfig::Pushover(_)));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # goat-herdr
 
-A [Herdr](https://herdr.dev) plugin that alerts you when an agent needs you. Telegram, Discord, ntfy, Slack, or any JSON webhook. From Telegram you can answer the agent.
+A [Herdr](https://herdr.dev) plugin that alerts you when an agent needs you. Telegram, Discord, ntfy, Pushover, Pushbullet, Slack, or any JSON webhook. From Telegram you can answer the agent.
 
 - An agent goes `blocked` or `done`: one message, with the host, workspace, agent, pane, and the last lines of its terminal.
 - Telegram forum topics give each agent pane its own thread.
@@ -49,6 +49,15 @@ url = "https://example.com/hook"       # or url_env = "MY_HOOK_URL"
 [[sinks]]
 type = "discord"
 webhook_url_env = "DISCORD_WEBHOOK_URL"   # or bot_token_env = "DISCORD_BOT_TOKEN" with channel_id = "..."
+
+[[sinks]]
+type = "pushover"
+app_token_env = "PUSHOVER_TOKEN"       # application token from pushover.net/apps/build
+user_key_env = "PUSHOVER_USERKEY"      # your user key from the Pushover dashboard
+
+[[sinks]]
+type = "pushbullet"
+token_env = "PUSHBULLET_TOKEN"         # access token from pushbullet.com/#settings/account
 ```
 
 Any `*_env` key names a variable that is read from `.env` next to `config.toml` first, then from the environment. Keep secrets there:
@@ -57,6 +66,9 @@ Any `*_env` key names a variable that is read from `.env` next to `config.toml` 
 TELEGRAM_BOT_TOKEN=123456:abc...
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+PUSHOVER_TOKEN=a...
+PUSHOVER_USERKEY=u...
+PUSHBULLET_TOKEN=o....
 ```
 
 Every alert starts with the same line, so one chat can carry several machines:
@@ -100,6 +112,14 @@ Posting only. A Discord bridge is on the [TODO](TODO.md).
 
 One POST per alert to the topic URL. `Title` is the headline, `Priority` is `urgent` for blocked and `default` for done, `Tags` is the status square. `token` or `token_env` adds `Authorization: Bearer` for a protected topic. One-way.
 
+### Pushover
+
+One message per alert to every device on the account. Needs two secrets: an application token, created at pushover.net/apps/build, and the user key shown on the Pushover dashboard. Blocked alerts are priority 1 (high), done is 0, other states are -1 (quiet). The title is the headline; the body is monospace and cut from the top to Pushover's 1,024-character limit. One-way.
+
+### Pushbullet
+
+One note per alert to every device on the account. Needs the access token from pushbullet.com, Settings → Account → Create Access Token. The title is the headline; the body is the plain rendering. One-way.
+
 ### Slack
 
 At api.slack.com/apps create an app from a manifest with the `incoming-webhook` bot scope, open Incoming Webhooks, add a webhook to a channel, and copy the URL. One POST per alert in mrkdwn with the tail in a code block. The URL is the credential. One-way.
@@ -126,7 +146,7 @@ One JSON POST per alert, `Content-Type: application/json`. Any 2xx is delivered.
 
 ### Adding one
 
-A sink is one file under `src/sink/` with a `name` and a `send`, plus one match arm in `src/sink/mod.rs` and a config struct. `ntfy.rs` is the template. Services with the same shape, an HTTP POST and a token: Mattermost (Slack-compatible webhook), Microsoft Teams (workflow webhook), Gotify, Pushover, Pushbullet, Matrix (a room webhook bot), and a desktop notifier (`osascript` on macOS, `notify-send` on Linux). Anything the `apprise` CLI covers can be reached by shelling out to it.
+A sink is one file under `src/sink/` with a `name` and a `send`, plus one match arm in `src/sink/mod.rs` and a config struct. `ntfy.rs` is the template. Services with the same shape, an HTTP POST and a token: Mattermost (Slack-compatible webhook), Microsoft Teams (workflow webhook), Gotify, Matrix (a room webhook bot), and a desktop notifier (`osascript` on macOS, `notify-send` on Linux). Anything the `apprise` CLI covers can be reached by shelling out to it.
 
 ## Bridge
 
@@ -174,7 +194,7 @@ The bridge lets a chat message drive a terminal on your machine.
 - The bot token is the credential. Anyone with it can read the group, post as the bot, and use the bot's admin rights. Keep it in `.env` in the plugin config directory, mode 600, never in the plugin root or a repo. The plugin does not write it to logs or error messages. If it leaks, revoke it in @BotFather.
 - Slack webhook URLs and secret webhook URLs are credentials in the same way. Errors name the host only, never the path.
 - Blocked alerts carry the last lines of the agent's terminal. Whatever is on screen goes to every configured sink.
-- Network destinations are the configured sinks: `api.telegram.org`, `discord.com`, your ntfy server, `hooks.slack.com`, your webhook URL. Nothing else.
+- Network destinations are the configured sinks: `api.telegram.org`, `discord.com`, your ntfy server, `api.pushover.net`, `api.pushbullet.com`, `hooks.slack.com`, your webhook URL. Nothing else.
 
 ## Develop
 

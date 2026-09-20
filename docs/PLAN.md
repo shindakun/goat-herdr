@@ -82,6 +82,8 @@ goat-herdr/
     sink/slack.rs
     sink/webhook.rs     # generic JSON POST
     sink/discord.rs     # webhook or bot token + channel
+    sink/pushover.rs
+    sink/pushbullet.rs
     sink/stdout.rs      # for tests and dry runs
   tests/fixtures/       # real HERDR_PLUGIN_EVENT_JSON captures
 ```
@@ -180,6 +182,19 @@ command = ["./target/release/goat-herdr", "bridge", "--detach"]
 - 429 carries `retry_after` in seconds as a float; sleep it and retry once, up to 30 s.
 - Errors use Discord's `message` field. `403 Missing Access` is a channel permission problem, not a token problem.
 - One-way. The bridge design is in `TODO.md`.
+
+## Pushover details
+
+- `POST https://api.pushover.net/1/messages.json`, JSON body with `token` (application), `user`, `title`, `message`, `priority`, `monospace`. Limits: title 250, message 1,024, cut from the top.
+- Success is HTTP 2xx and `"status": 1` in the body; `"status": 0` carries an `errors` array, which becomes the error text.
+- Priority: blocked 1, done 0, others -1. Priority 2 (emergency, requires acknowledgement) is not used.
+- One-way.
+
+## Pushbullet details
+
+- `POST https://api.pushbullet.com/v2/pushes` with `Access-Token` header and `{"type": "note", "title", "body"}`.
+- Errors carry `error.message`.
+- One-way.
 
 ## Slack details
 

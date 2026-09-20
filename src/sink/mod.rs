@@ -3,6 +3,8 @@
 
 mod discord;
 mod ntfy;
+mod pushbullet;
+mod pushover;
 mod slack;
 mod stdout;
 mod telegram;
@@ -49,6 +51,10 @@ pub fn build(config: &Config, state_dir: &Path) -> Result<Vec<Box<dyn Sink>>, St
                 SinkConfig::Slack(cfg) => Ok(Box::new(slack::Slack::new(cfg, config)?)),
                 SinkConfig::Webhook(cfg) => Ok(Box::new(webhook::Webhook::new(cfg, config)?)),
                 SinkConfig::Discord(cfg) => Ok(Box::new(discord::Discord::new(cfg, config)?)),
+                SinkConfig::Pushbullet(cfg) => {
+                    Ok(Box::new(pushbullet::Pushbullet::new(cfg, config)?))
+                }
+                SinkConfig::Pushover(cfg) => Ok(Box::new(pushover::Pushover::new(cfg, config)?)),
             }
         })
         .collect()

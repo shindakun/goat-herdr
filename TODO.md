@@ -17,4 +17,4 @@ Shape of the work: a `Bridge` impl for Discord in `sink/discord.rs`, a Gateway c
 
 ## Other sinks
 
-Gotify, Pushover, Pushbullet, Mattermost, Microsoft Teams, Matrix, a desktop notifier, `apprise`. Each is one file; `ntfy.rs` is the template.
+Gotify, Mattermost, Microsoft Teams, Matrix, a desktop notifier, `apprise`. Each is one file; `ntfy.rs` is the template.
