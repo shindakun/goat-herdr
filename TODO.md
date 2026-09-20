@@ -31,6 +31,23 @@ What Slack needs:
 
 Shape of the work: a `Bridge` impl in `sink/slack.rs` behind `bot_token_env` and `app_token_env`, a Socket Mode client of about 200 lines (open, read, ack, reconnect), `chat.postMessage` with blocks in `send`, and a `slack` entry in state mapping `thread_ts` to the pane. The dispatch in `bridge.rs` does not change.
 
+## Config modal
+
+Herdr plugin v1 has no native plugin UI. It has `placement = "popup"`: a session-modal terminal over the workspace that takes all input, closes when its command exits, and is opened by an action running `herdr plugin pane open --plugin shindakun.goat-herdr --entrypoint config --placement popup`. `herdr-navigator` works this way. A config modal is `goat-herdr config` running in that popup.
+
+What it does: list sinks with their state, toggle one, add one (type, then the fields; a secret goes to `.env` and the entry stores the `*_env` name), remove one, send a test alert to one.
+
+What it needs:
+
+- `enabled = true|false` on every sink entry, default true; `notify` and `test` skip disabled sinks.
+- A file the modal owns. Serializing `config.toml` through `toml` drops comments and order, so the modal writes `sinks.toml` in the config directory and `Config::load` merges it after `config.toml`. Hand edits stay untouched.
+- A `[[panes]] id = "config" placement = "popup" width = "70%" height = "60%"` entry and an action that opens it.
+- After a Telegram change, run the `bridge` action so the daemon rereads its config. Every other change is live on the next hook.
+
+UI: a line-oriented menu with no new dependencies. The popup is a real terminal, so numbered choices and line input work without raw mode. `crossterm` for arrow keys is the next step up; `ratatui` is what navigator and reviewr use.
+
+Size: about 300 lines.
+
 ## Other sinks
 
 Gotify, Mattermost, Microsoft Teams, Matrix, `apprise`. Each is one file; `ntfy.rs` is the template.
