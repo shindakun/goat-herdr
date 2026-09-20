@@ -81,6 +81,7 @@ goat-herdr/
     sink/ntfy.rs
     sink/slack.rs
     sink/webhook.rs     # generic JSON POST
+    sink/discord.rs     # webhook or bot token + channel
     sink/stdout.rs      # for tests and dry runs
   tests/fixtures/       # real HERDR_PLUGIN_EVENT_JSON captures
 ```
@@ -171,6 +172,14 @@ command = ["./target/release/goat-herdr", "bridge", "--detach"]
 - `POST <url>` with `Content-Type: application/json`. Body: `source`, `status`, `host`, `workspace`, `agent`, `pane_id`, `headline`, `tail` (null when absent), `text` (the plain rendering). The README carries the example document.
 - Any 2xx is delivered; otherwise the error carries the status and the first 200 chars of the body. No retry.
 - No headers or auth; a secret rides in the URL through `url_env`. One-way.
+
+## Discord details
+
+- Webhook: `POST <url>?wait=true` with `{"content": ...}`; `wait` makes Discord answer 200 instead of 204. Bot: `POST https://discord.com/api/v10/channels/<id>/messages` with `Authorization: Bot <token>`.
+- Content limit 2,000 chars; the tail is cut from the top. Markdown control characters in the headline are backslash-escaped; ``` inside the tail is replaced.
+- 429 carries `retry_after` in seconds as a float; sleep it and retry once, up to 30 s.
+- Errors use Discord's `message` field. `403 Missing Access` is a channel permission problem, not a token problem.
+- One-way. The bridge design is in `TODO.md`.
 
 ## Slack details
 

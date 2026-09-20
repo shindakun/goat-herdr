@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Discord sink: channel webhook, or bot token plus channel id.
+
 ## 0.1.1 (2026-09-19)
 
 - `scripts/release.sh` bumps the version, checks, tags, pushes, and publishes the GitHub release.

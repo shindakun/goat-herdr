@@ -1,6 +1,7 @@
 //! Delivery targets. One module per service; `build` maps config entries to
 //! instances. Adding a service means one file here and one match arm below.
 
+mod discord;
 mod ntfy;
 mod slack;
 mod stdout;
@@ -47,6 +48,7 @@ pub fn build(config: &Config, state_dir: &Path) -> Result<Vec<Box<dyn Sink>>, St
                 SinkConfig::Ntfy(cfg) => Ok(Box::new(ntfy::Ntfy::new(cfg, config)?)),
                 SinkConfig::Slack(cfg) => Ok(Box::new(slack::Slack::new(cfg, config)?)),
                 SinkConfig::Webhook(cfg) => Ok(Box::new(webhook::Webhook::new(cfg, config)?)),
+                SinkConfig::Discord(cfg) => Ok(Box::new(discord::Discord::new(cfg, config)?)),
             }
         })
         .collect()

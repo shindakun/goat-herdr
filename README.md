@@ -1,6 +1,6 @@
 # goat-herdr
 
-A [Herdr](https://herdr.dev) plugin that alerts you when an agent needs you. Telegram, ntfy, Slack, or any JSON webhook. From Telegram you can answer the agent.
+A [Herdr](https://herdr.dev) plugin that alerts you when an agent needs you. Telegram, Discord, ntfy, Slack, or any JSON webhook. From Telegram you can answer the agent.
 
 - An agent goes `blocked` or `done`: one message, with the host, workspace, agent, pane, and the last lines of its terminal.
 - Telegram forum topics give each agent pane its own thread.
@@ -45,6 +45,10 @@ webhook_url_env = "SLACK_WEBHOOK_URL"  # or webhook_url = "https://hooks.slack.c
 [[sinks]]
 type = "webhook"
 url = "https://example.com/hook"       # or url_env = "MY_HOOK_URL"
+
+[[sinks]]
+type = "discord"
+webhook_url_env = "DISCORD_WEBHOOK_URL"   # or bot_token_env = "DISCORD_BOT_TOKEN" with channel_id = "..."
 ```
 
 Any `*_env` key names a variable that is read from `.env` next to `config.toml` first, then from the environment. Keep secrets there:
@@ -52,6 +56,7 @@ Any `*_env` key names a variable that is read from `.env` next to `config.toml` 
 ```sh
 TELEGRAM_BOT_TOKEN=123456:abc...
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
 ```
 
 Every alert starts with the same line, so one chat can carry several machines:
@@ -75,6 +80,15 @@ Create a bot with @BotFather and put its token in `.env`. Send the bot a message
 - `none`: everything in the chat root.
 
 `api_url` overrides `https://api.telegram.org` for a self-hosted Bot API server.
+
+### Discord
+
+One message per alert in a channel: bold headline, pane line, tail in a code block, within Discord's 2,000-character limit. Two ways in:
+
+- Webhook: channel settings → Integrations → Webhooks → New Webhook → Copy Webhook URL. `webhook_url` or `webhook_url_env`. No bot needed.
+- Bot: the app's token from the Developer Portal (Bot → Reset Token) as `bot_token` or `bot_token_env`, plus `channel_id`. The bot needs View Channel and Send Messages in that channel; `403 Missing Access` means it does not have them.
+
+Posting only. A Discord bridge is on the [TODO](TODO.md).
 
 ### ntfy
 
@@ -106,7 +120,7 @@ One JSON POST per alert, `Content-Type: application/json`. Any 2xx is delivered.
 
 ### Adding one
 
-A sink is one file under `src/sink/` with a `name` and a `send`, plus one match arm in `src/sink/mod.rs` and a config struct. `ntfy.rs` is the template. Services with the same shape, an HTTP POST and a token: Discord (webhook, `content` field), Mattermost (Slack-compatible webhook), Microsoft Teams (workflow webhook), Gotify, Pushover, Pushbullet, Matrix (a room webhook bot), and a desktop notifier (`osascript` on macOS, `notify-send` on Linux). Anything the `apprise` CLI covers can be reached by shelling out to it.
+A sink is one file under `src/sink/` with a `name` and a `send`, plus one match arm in `src/sink/mod.rs` and a config struct. `ntfy.rs` is the template. Services with the same shape, an HTTP POST and a token: Mattermost (Slack-compatible webhook), Microsoft Teams (workflow webhook), Gotify, Pushover, Pushbullet, Matrix (a room webhook bot), and a desktop notifier (`osascript` on macOS, `notify-send` on Linux). Anything the `apprise` CLI covers can be reached by shelling out to it.
 
 ## Bridge
 
@@ -154,7 +168,7 @@ The bridge lets a chat message drive a terminal on your machine.
 - The bot token is the credential. Anyone with it can read the group, post as the bot, and use the bot's admin rights. Keep it in `.env` in the plugin config directory, mode 600, never in the plugin root or a repo. The plugin does not write it to logs or error messages. If it leaks, revoke it in @BotFather.
 - Slack webhook URLs and secret webhook URLs are credentials in the same way. Errors name the host only, never the path.
 - Blocked alerts carry the last lines of the agent's terminal. Whatever is on screen goes to every configured sink.
-- Network destinations are the configured sinks: `api.telegram.org`, your ntfy server, `hooks.slack.com`, your webhook URL. Nothing else.
+- Network destinations are the configured sinks: `api.telegram.org`, `discord.com`, your ntfy server, `hooks.slack.com`, your webhook URL. Nothing else.
 
 ## Develop
 

@@ -58,6 +58,26 @@ pub enum SinkConfig {
     Ntfy(NtfyConfig),
     Slack(SlackConfig),
     Webhook(WebhookConfig),
+    Discord(DiscordConfig),
+}
+
+/// Either a channel webhook, or a bot token plus the channel it posts to.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiscordConfig {
+    #[serde(default)]
+    pub webhook_url: Option<String>,
+    #[serde(default)]
+    pub webhook_url_env: Option<String>,
+    #[serde(default)]
+    pub bot_token: Option<String>,
+    #[serde(default)]
+    pub bot_token_env: Option<String>,
+    #[serde(default)]
+    pub channel_id: Option<String>,
+    /// Bot API base; override for tests.
+    #[serde(default = "default_discord_api")]
+    pub api_url: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -201,6 +221,10 @@ fn default_tail_lines() -> u32 {
     30
 }
 
+fn default_discord_api() -> String {
+    "https://discord.com/api/v10".to_string()
+}
+
 fn default_telegram_api() -> String {
     "https://api.telegram.org".to_string()
 }
@@ -259,6 +283,11 @@ webhook_url_env = "SLACK_WEBHOOK_URL"
 [[sinks]]
 type = "webhook"
 url = "https://example.test/hook"
+
+[[sinks]]
+type = "discord"
+bot_token_env = "DISCORD_BOT_TOKEN"
+channel_id = "186985279377113088"
 "#,
         )
         .unwrap();
@@ -277,6 +306,12 @@ url = "https://example.test/hook"
         assert!(matches!(config.sinks[2], SinkConfig::Ntfy(_)));
         assert!(matches!(config.sinks[3], SinkConfig::Slack(_)));
         assert!(matches!(config.sinks[4], SinkConfig::Webhook(_)));
+        match &config.sinks[5] {
+            SinkConfig::Discord(d) => {
+                assert_eq!(d.channel_id.as_deref(), Some("186985279377113088"))
+            }
+            other => panic!("expected discord, got {other:?}"),
+        }
     }
 
     #[test]
