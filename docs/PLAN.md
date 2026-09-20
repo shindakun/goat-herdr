@@ -1,6 +1,6 @@
 # goat-herdr
 
-A Herdr plugin that alerts you when an agent needs you. Rust. One binary. Sinks are modules: Telegram (with a two-way bridge), ntfy, Slack, and a generic JSON webhook.
+A Herdr plugin that alerts you when an agent needs you. Rust. One binary. Sinks are modules: Telegram (with a two-way bridge), Discord, ntfy, Pushover, Pushbullet, Slack, and a generic JSON webhook.
 
 ## What it does
 

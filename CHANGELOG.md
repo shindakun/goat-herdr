@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-09-19)
 
 - Pushover sink (application token plus user key, priority by state).
 - Pushbullet sink (access token).
