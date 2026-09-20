@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-09-19)
 
-- Discord sink: channel webhook, or bot token plus channel id.
+- Discord sink: channel webhook, or bot token plus channel id. Posting only; the bridge design is in `TODO.md`.
 
 ## 0.1.1 (2026-09-19)
 
