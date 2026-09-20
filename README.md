@@ -62,6 +62,9 @@ token_env = "PUSHBULLET_TOKEN"         # access token from pushbullet.com/#setti
 [[sinks]]
 type = "desktop"
 sound = "Ping"                         # macOS system sound; optional
+
+[[sinks]]
+type = "stdout"                        # prints to the plugin log; the default when no sink is set
 ```
 
 Any `*_env` key names a variable that is read from `.env` next to `config.toml` first, then from the environment. Keep secrets there:

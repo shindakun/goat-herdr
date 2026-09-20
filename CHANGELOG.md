@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-09-19)
 
 - Desktop sink: `osascript` banner on macOS, `notify-send` on Linux.
 
