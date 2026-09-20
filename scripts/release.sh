@@ -23,7 +23,12 @@ git fetch -q origin main
 ! git rev-parse -q --verify "refs/tags/v$version" >/dev/null || { echo "tag v$version exists" >&2; exit 1; }
 grep -q "^## $version (" CHANGELOG.md || { echo "CHANGELOG.md has no '## $version (' section" >&2; exit 1; }
 
-# Version lives in two manifests plus the lockfile.
+# Checks run on the clean tree first; they do not depend on the version.
+make check
+
+# Version lives in two manifests plus the lockfile. Until the commit lands,
+# any exit restores them so a rerun starts from a clean tree.
+trap 'git checkout -- Cargo.toml Cargo.lock herdr-plugin.toml' EXIT
 # First "version =" line only; BSD sed has no 0,/re/ address, so perl.
 perl -pi -e 'BEGIN { $v = shift } if (!$done && s/^version = "[^"]+"/version = "$v"/) { $done = 1 }' "$version" Cargo.toml
 perl -pi -e 'BEGIN { $v = shift } s/^version = "[^"]+"/version = "$v"/' "$version" herdr-plugin.toml
@@ -31,11 +36,11 @@ cargo update -q --workspace
 grep -q "^version = \"$version\"" Cargo.toml herdr-plugin.toml
 grep -A1 '^name = "goat-herdr"' Cargo.lock | grep -q "version = \"$version\""
 
-make check
 cargo build --release
 
 git add Cargo.toml Cargo.lock herdr-plugin.toml
 git commit -q -m "Release $version"
+trap - EXIT
 git tag -a "v$version" -m "goat-herdr $version"
 git push -q origin main "v$version"
 
