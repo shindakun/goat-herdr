@@ -86,7 +86,13 @@ Create a bot with @BotFather and put its token in `.env`. Send the bot a message
 One message per alert in a channel: bold headline, pane line, tail in a code block, within Discord's 2,000-character limit. Two ways in:
 
 - Webhook: channel settings → Integrations → Webhooks → New Webhook → Copy Webhook URL. `webhook_url` or `webhook_url_env`. No bot needed.
-- Bot: the app's token from the Developer Portal (Bot → Reset Token) as `bot_token` or `bot_token_env`, plus `channel_id`. The bot needs View Channel and Send Messages in that channel; `403 Missing Access` means it does not have them.
+- Bot: create an application at discord.com/developers, open Bot, reset the token, and put it in `.env` as `bot_token_env` names it. Invite the bot to your server with the `bot` scope and the permissions it needs (View Channel, Send Messages, Send Messages in Threads):
+
+  ```text
+  https://discord.com/oauth2/authorize?client_id=<APPLICATION_ID>&scope=bot&permissions=309237648384
+  ```
+
+  `<APPLICATION_ID>` is on the app's General Information page. Adding the app from the Developer Portal without that URL installs it with no bot member, and every post fails with `403 Missing Access`. Then set `channel_id` to the channel's id (Copy Channel ID in Discord with Developer Mode on, or the last number in the channel's URL).
 
 Posting only. A Discord bridge is on the [TODO](TODO.md).
 
