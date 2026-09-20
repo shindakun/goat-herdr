@@ -18,7 +18,7 @@ Every alert answers three questions in its first line: which host, which workspa
 pane w3:p3
 ```
 
-Telegram routing uses forum topics. The chat is a supergroup with Topics on; the bot is an admin with Manage Topics. One topic per agent pane `(host, workspace, agent, pane id)`, so a reply in a topic has exactly one target; or per `(host, workspace)` with `topics = "per-workspace"`, shared by every agent in the workspace. Pane ids are per server session, so a restart gives an agent a new topic and the old one stays closed. The workspace part drops Herdr's `[n]` ordinal prefix so a reorder does not split a project across topics. The plugin creates topics lazily with `createForumTopic`, caches `message_thread_id` in state, closes the topic when the last pane behind it closes, and reopens it when the same key returns. Telegram lets an admin bot post into a closed topic without error, so the plugin records which topics it closed and reopens them explicitly. Every `sendMessage` sets `message_thread_id`. The header line is always present, so a plain private chat works as well.
+Telegram routing uses forum topics. The chat is a supergroup with Topics on; the bot is an admin with Manage Topics. `per-agent` keys a topic by host, workspace, agent, and pane id, so a reply has one target. `per-workspace` keys by host and workspace and every agent in it shares the topic. Pane ids are per server session: a restart gives an agent a new topic and the old one stays closed. The workspace part drops Herdr's `[n]` ordinal so a reorder does not split a project. Topics are created with `createForumTopic` on first use, cached by `message_thread_id` in state, closed when the pane closes, and reopened when the key returns. Telegram lets an admin bot post into a closed topic without error, so the plugin records what it closed and reopens explicitly. Every `sendMessage` sets `message_thread_id`. The header line is always present, so a private chat works too.
 
 Two ways to run several hosts:
 
@@ -224,7 +224,7 @@ command = ["./target/release/goat-herdr", "bridge", "--detach"]
 
 `herdr agent prompt` is the only call that submits Claude Code's main input box (bracketed paste, 300 ms, Enter). `pane send-keys Enter` after `pane send-text` leaves the main box unsubmitted, but does submit a dialog's text field. `agent prompt` and `agent send-keys` refuse panes Herdr has not classified as named agents; `pane send-keys` works on any pane.
 
-Topic to pane: state maps `message_thread_id` to the routing key and the key to the panes that posted under it; the bridge keeps only panes present in `herdr agent list`, preferring a blocked one. With `per-agent` the key includes the pane id, so there is one candidate.
+Topic to pane: state maps `message_thread_id` to the routing key, and the key to the panes that posted under it. The bridge keeps the panes present in `herdr agent list` and prefers a blocked one. With `per-agent` the key holds the pane id, so there is one candidate.
 
 The daemon outlives the hook that started it (own process group). The startup hook on a new server, or the `bridge` action, sends TERM to the pid in `bridge.pid`, waits for `bridge.lock`, and starts a fresh one. Poll failures back off 2 s per failure, capped at 10 s. Every handled or dropped input is one line in `bridge.log`; error text never contains a URL path, because Telegram's carries the bot token.
 

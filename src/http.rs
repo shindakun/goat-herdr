@@ -1,5 +1,5 @@
-//! Thin blocking HTTP client. Sinks go through this so tests can point them
-//! at a local listener and assert on the request.
+//! Blocking HTTP client. Sinks go through it so tests can point them at a
+//! local listener and read the request.
 
 use std::time::Duration;
 

@@ -79,7 +79,7 @@ fn notify() -> Result<(), String> {
             return Ok(());
         }
         if alert.status == Status::Blocked && config.alerts.tail_lines > 0 {
-            // A tail is nice to have; the alert still goes out without it.
+            // The alert goes out without a tail.
             let started = std::time::Instant::now();
             match env.read_tail(&alert.pane_id, config.alerts.tail_lines) {
                 Ok(tail) => alert.tail = Some(tail),

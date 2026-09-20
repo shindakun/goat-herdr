@@ -220,7 +220,7 @@ herdr plugin log list --plugin shindakun.goat-herdr
 
 `make check` runs fmt, clippy, tests, `cargo audit`, and markdownlint. CI runs the same on Linux and macOS. The linked plugin executes `target/release/goat-herdr`, so rebuild release before testing in Herdr. Design and milestones: [docs/PLAN.md](docs/PLAN.md).
 
-To release: add a `## X.Y.Z (date)` section to `CHANGELOG.md`, commit it, then `scripts/release.sh X.Y.Z`. The script bumps `Cargo.toml`, `Cargo.lock`, and `herdr-plugin.toml`, runs `make check` and a release build, commits, tags `vX.Y.Z`, pushes, and publishes the GitHub release with the changelog section as notes. The marketplace picks up the new version from the tag within about 30 minutes.
+To release: add a `## X.Y.Z (date)` section to `CHANGELOG.md`, commit it, then `scripts/release.sh X.Y.Z`. The script runs `make check`, bumps `Cargo.toml`, `Cargo.lock`, and `herdr-plugin.toml`, builds release, commits, tags `vX.Y.Z`, pushes, and publishes the GitHub release with the changelog section as notes. The marketplace shows the new version within 30 minutes.
 
 ## License
 

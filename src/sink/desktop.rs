@@ -7,7 +7,7 @@ use crate::alert::{Alert, Status};
 use crate::config::DesktopConfig;
 use crate::sink::{Delivery, Sink};
 
-/// Body lines are short on every desktop; two lines of tail is what fits.
+/// Two tail lines fit a banner.
 const TAIL_LINES: usize = 2;
 
 pub struct Desktop {

@@ -61,8 +61,7 @@ impl Status {
 }
 
 impl Alert {
-    /// Builds an alert from a hook event. Returns `None` when the event is
-    /// one the config says to ignore.
+    /// An alert from a hook event, or `None` when the config ignores it.
     pub fn from_event(
         event: &herdr::EventEnvelope,
         context: &herdr::Context,
@@ -116,8 +115,8 @@ impl Alert {
         }
     }
 
-    /// Workspace name without Herdr's `[n] ` ordinal, which changes when
-    /// workspaces reorder and must not split one project across topics.
+    /// Workspace name without Herdr's `[n]` ordinal. The ordinal changes on
+    /// reorder and must not split one project across topics.
     pub fn workspace_name(&self) -> &str {
         let label = self.workspace.as_str();
         let Some(rest) = label.strip_prefix('[') else {

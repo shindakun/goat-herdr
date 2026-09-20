@@ -13,7 +13,7 @@ What Discord needs that Telegram does not:
 - Reconnect. The Gateway closes sessions; the daemon has to resume with the last sequence number or re-identify, and respect the 1000 identifies per day limit.
 - Authorization is the sender's user id, same rule as `allowed_user_ids`.
 
-Shape of the work: a `Bridge` impl for Discord in `sink/discord.rs`, a Gateway client of about 300 lines, `components` on blocked alerts, thread creation in `send`, and a `discord` cursor (session id plus sequence) in state. The dispatch in `bridge.rs` does not change.
+The work: a `Bridge` impl in `sink/discord.rs`; a Gateway client of about 300 lines; `components` on blocked alerts; thread creation in `send`; a `discord` cursor (session id plus sequence) in state. `bridge.rs` does not change.
 
 ## Slack bridge
 
@@ -29,13 +29,13 @@ What Slack needs:
 - Authorization is the sender's Slack user id (`U...`), the same rule as `allowed_user_ids`.
 - Rate limits: `chat.postMessage` is about one per second per channel; 429 carries `Retry-After` in seconds.
 
-Shape of the work: a `Bridge` impl in `sink/slack.rs` behind `bot_token_env` and `app_token_env`, a Socket Mode client of about 200 lines (open, read, ack, reconnect), `chat.postMessage` with blocks in `send`, and a `slack` entry in state mapping `thread_ts` to the pane. The dispatch in `bridge.rs` does not change.
+The work: a `Bridge` impl in `sink/slack.rs` behind `bot_token_env` and `app_token_env`; a Socket Mode client of about 200 lines (open, read, ack, reconnect); `chat.postMessage` with blocks in `send`; a `slack` entry in state mapping `thread_ts` to the pane. `bridge.rs` does not change.
 
 ## Config modal
 
-Herdr plugin v1 has no native plugin UI. It has `placement = "popup"`: a session-modal terminal over the workspace that takes all input, closes when its command exits, and is opened by an action running `herdr plugin pane open --plugin shindakun.goat-herdr --entrypoint config --placement popup`. `herdr-navigator` works this way. A config modal is `goat-herdr config` running in that popup.
+Herdr plugin v1 has no native plugin UI. It has `placement = "popup"`: a session-modal terminal over the workspace. It takes all input and closes when its command exits. An action opens it with `herdr plugin pane open --plugin shindakun.goat-herdr --entrypoint config --placement popup`. `herdr-navigator` works this way. A config modal is `goat-herdr config` running in that popup.
 
-What it does: list sinks with their state, toggle one, add one (type, then the fields; a secret goes to `.env` and the entry stores the `*_env` name), remove one, send a test alert to one.
+What it does: list sinks with their state; toggle one; add one (pick the type, fill the fields; a secret goes to `.env` and the entry stores the `*_env` name); remove one; send a test alert to one.
 
 What it needs:
 

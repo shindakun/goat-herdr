@@ -1,5 +1,5 @@
 //! Generic webhook: one JSON POST per alert to any URL. The body is the
-//! alert itself, so anything that accepts JSON can consume it.
+//! alert itself.
 
 use crate::alert::{Alert, Status};
 use crate::config::{Config, WebhookConfig};

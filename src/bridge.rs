@@ -1,6 +1,6 @@
-//! The two-way bridge: a detached daemon that polls chat services for input
-//! and turns it into Herdr agent commands. One thread per bridge-capable
-//! sink. Service specifics live behind the `Bridge` trait.
+//! The two-way bridge: a detached daemon that turns chat input into Herdr
+//! agent commands. One thread per bridge-capable sink; service specifics
+//! live behind the `Bridge` trait.
 
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -25,7 +25,7 @@ pub struct Inbound {
 
 pub trait Bridge: Send {
     fn name(&self) -> &str;
-    /// Blocks up to ~30s. Returns the inputs that arrived.
+    /// Blocks up to 25 s. Returns the inputs that arrived.
     fn poll(&self) -> Result<Vec<Inbound>, String>;
     /// Posts `text` where `inbound` came from. `pre` asks for a monospace
     /// block.
@@ -169,7 +169,7 @@ fn serve(bridge: Box<dyn Bridge>, env: &PluginEnv, state: &State) {
             Err(err) => {
                 failures += 1;
                 eprintln!("bridge {}: poll failed ({failures}): {err}", bridge.name());
-                // Short, capped back-off: a DNS blip should not cost half a minute.
+                // Capped back-off; a DNS blip recovers in seconds.
                 std::thread::sleep(Duration::from_secs((failures as u64 * 2).min(10)));
             }
         }
@@ -272,7 +272,7 @@ fn handle_button(
         "k" => {
             let keys: Vec<&str> = parts.collect();
             env.send_keys(pane, &keys)?;
-            // The toast is easy to miss; leave a line in the topic too.
+            // The toast fades; the topic keeps a line.
             bridge.ack(inbound, &format!("sent {}", keys.join(" ")))?;
             let line = if keys.len() == 1 && keys[0].chars().all(|c| c.is_ascii_digit()) {
                 format!("{pane} ← {}. Now send your text as a reply.", keys[0])

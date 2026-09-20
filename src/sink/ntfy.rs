@@ -1,5 +1,5 @@
-//! ntfy: one POST per alert. The URL is the topic. This is the reference for
-//! every webhook-style sink.
+//! ntfy: one POST per alert. The URL is the topic. The template for every
+//! webhook-style sink.
 
 use crate::alert::{Alert, Status};
 use crate::config::{Config, NtfyConfig};

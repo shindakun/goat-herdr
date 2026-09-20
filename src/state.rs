@@ -34,7 +34,7 @@ struct Topics {
 /// A topic to post into.
 pub struct TopicHandle {
     pub thread_id: i64,
-    /// This plugin closed the topic; reopen it before posting.
+    /// The plugin closed the topic; reopen before posting.
     pub closed: bool,
 }
 
@@ -71,9 +71,8 @@ impl State {
         }
     }
 
-    /// Records this pane and status. Returns false when the same pair was
-    /// recorded inside `window_secs`, which means the caller should drop the
-    /// alert.
+    /// Records this pane and status. False when the same pair was recorded
+    /// inside `window_secs`: drop the alert.
     pub fn debounce(&self, pane_id: &str, status: &str, window_secs: u64) -> Result<bool, String> {
         let _guard = self.lock()?;
         let path = self.dir.join("debounce.json");
@@ -108,9 +107,8 @@ impl State {
         std::fs::write(&path, text).map_err(|err| format!("write {}: {err}", path.display()))
     }
 
-    /// The thread id for `key`, creating it through `create` under the lock
-    /// so two hooks for the same key cannot both create a topic. Records that
-    /// `pane_id` posts to this key.
+    /// The thread for `key`, created through `create` under the lock so two
+    /// hooks cannot both create it. Records that `pane_id` posts to this key.
     pub fn topic_thread(
         &self,
         key: &str,
@@ -136,7 +134,7 @@ impl State {
         })
     }
 
-    /// Records whether this plugin has the topic closed.
+    /// Records whether the plugin has the topic closed.
     pub fn topic_set_closed(&self, key: &str, closed: bool) -> Result<(), String> {
         let _guard = self.lock()?;
         let path = self.dir.join("topics.json");

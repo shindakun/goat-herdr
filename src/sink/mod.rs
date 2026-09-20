@@ -26,8 +26,8 @@ pub trait Sink {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Delivery {
     Sent,
-    /// The sink has nothing to do for this alert (for example, a pane close
-    /// on a sink with no per-agent state).
+    /// Nothing to do for this alert, such as a pane close on a sink with no
+    /// per-agent state.
     Skipped,
 }
 

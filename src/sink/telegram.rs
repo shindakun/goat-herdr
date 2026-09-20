@@ -1,7 +1,6 @@
-//! Telegram Bot API. `sendMessage` in HTML parse mode with agent output in a
-//! `<pre>` block. With topics on, each alert goes to a forum topic named for
-//! its agent, workspace, and host; topics are created on first use, closed
-//! when the last pane behind them closes, and reopened when one returns.
+//! Telegram Bot API. `sendMessage` in HTML with the tail in `<pre>`. With
+//! topics on, each alert goes to a forum topic created on first use, closed
+//! when its pane closes, and reopened when the pane alerts again.
 
 use crate::alert::{Alert, Status};
 use crate::bridge::{Bridge, Inbound};
@@ -181,7 +180,7 @@ impl Telegram {
             .ok_or_else(|| "telegram createForumTopic: no message_thread_id in result".to_string())
     }
 
-    /// The thread to post into, reopened first when this plugin closed it.
+    /// The thread to post into, reopened first when the plugin closed it.
     fn thread_for(&self, key: &str, alert: &Alert) -> Result<i64, String> {
         let handle = self.state.topic_thread(key, &alert.pane_id, || {
             self.create_topic(&self.topic_name(alert))
@@ -247,9 +246,8 @@ impl Telegram {
                 button("n", format!("k|{pane}|n|Enter")),
             ]);
         } else {
-            // One option per row so the labels stay readable on a phone. A
-            // free-text option gets the digit only; the user's next reply
-            // fills the field.
+            // One option per row; labels stay readable on a phone. A
+            // free-text option gets the digit only; the next reply fills it.
             for (number, label) in &options {
                 let data = if free_text_option(label) {
                     format!("k|{pane}|{number}")
@@ -272,7 +270,7 @@ impl Telegram {
             return Ok(());
         };
         if release.last_pane {
-            // A topic that is gone is not worth failing the hook over.
+            // A missing topic does not fail the hook.
             match self.topic_call("closeForumTopic", release.thread_id) {
                 Ok(()) => self.state.topic_set_closed(&release.key, true)?,
                 Err(err) => eprintln!("goat-herdr: {err}"),

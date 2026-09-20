@@ -55,12 +55,10 @@ impl PluginEnv {
         Ok(envelope.result.agents)
     }
 
-    /// Gives text to an agent. Idle or working: `agent prompt`, which knows
-    /// each agent's submit sequence (bracketed paste, a pause, then Enter)
-    /// and is the only thing that submits Claude Code's main input box.
-    /// Blocked: a dialog is open, `agent prompt` refuses, and the text is
-    /// typed into the dialog's field followed by Enter, which submits a
-    /// free-text option (verified on Claude Code's AskUserQuestion).
+    /// Text to an agent. Idle or working: `agent prompt`, the only call that
+    /// submits Claude Code's main input box (paste, pause, Enter). Blocked:
+    /// `agent prompt` refuses; the text is typed into the open dialog field
+    /// and submitted with Enter.
     pub fn agent_prompt(&self, pane_id: &str, text: &str) -> Result<&'static str, String> {
         match self.run(&["agent", "prompt", pane_id, text]) {
             Ok(_) => Ok("prompted"),
@@ -77,16 +75,15 @@ impl PluginEnv {
         }
     }
 
-    /// Key presses to any pane. `pane send-keys` works whether or not
-    /// Herdr classifies the pane as a named agent.
+    /// Key presses to any pane, named agent or not.
     pub fn send_keys(&self, pane_id: &str, keys: &[&str]) -> Result<(), String> {
         let mut args = vec!["pane", "send-keys", pane_id];
         args.extend_from_slice(keys);
         self.run(&args).map(|_| ())
     }
 
-    /// Runs the Herdr CLI and returns stdout. A failing exit is an error
-    /// carrying stderr.
+    /// Runs the Herdr CLI and returns stdout. A failing exit is an error with
+    /// stderr.
     fn run(&self, args: &[&str]) -> Result<String, String> {
         let output = Command::new(&self.bin_path)
             .args(args)

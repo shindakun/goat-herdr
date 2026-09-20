@@ -1,6 +1,6 @@
-//! `config.toml` in `HERDR_PLUGIN_CONFIG_DIR`. See docs/PLAN.md for the full
-//! shape. A missing file yields the defaults with a stdout sink so a fresh
-//! install is observable in `herdr plugin log list`.
+//! `config.toml` in `HERDR_PLUGIN_CONFIG_DIR`; the README documents every
+//! key. A missing file means the defaults and the stdout sink, so a fresh
+//! install shows up in `herdr plugin log list`.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -16,8 +16,8 @@ pub struct Config {
     pub alerts: Alerts,
     #[serde(default)]
     pub sinks: Vec<SinkConfig>,
-    /// `KEY=VALUE` pairs from `.env` beside `config.toml`. Consulted before the
-    /// process environment when a sink names a `*_env` variable.
+    /// `KEY=VALUE` pairs from `.env` beside `config.toml`, read before the
+    /// process environment for `*_env` names.
     #[serde(skip)]
     pub dotenv: HashMap<String, String>,
 }
@@ -149,8 +149,8 @@ pub struct TelegramConfig {
     /// an admin with Manage Topics.
     #[serde(default)]
     pub topics: TopicMode,
-    /// Run the two-way bridge: replies in a topic go to that agent, blocked
-    /// alerts carry an inline keyboard. Needs `allowed_user_ids`.
+    /// Two-way bridge: topic replies go to the agent, blocked alerts carry
+    /// buttons. Needs `allowed_user_ids`.
     #[serde(default)]
     pub bridge: bool,
     /// Telegram user ids the bridge takes input from. Everyone else is ignored.
@@ -167,8 +167,8 @@ pub enum TopicMode {
     /// Everything in the chat root.
     #[default]
     None,
-    /// One topic per agent pane: host, workspace, agent, and pane id. A
-    /// reply in the topic has exactly one place to go.
+    /// One topic per agent pane: host, workspace, agent, pane id. A reply
+    /// has one target.
     PerAgent,
     /// One topic per host and workspace.
     PerWorkspace,
@@ -277,7 +277,7 @@ fn default_telegram_api() -> String {
 }
 
 fn default_host_label() -> String {
-    // `hostname` is on every supported platform and avoids a crate for one call.
+    // `hostname` exists on both platforms; no crate for one call.
     std::process::Command::new("hostname")
         .output()
         .ok()
