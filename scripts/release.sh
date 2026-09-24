@@ -4,7 +4,8 @@
 #
 #   scripts/release.sh 0.1.1
 #
-# Requires a clean tree on main, a "## <version> (" heading in CHANGELOG.md,
+# Requires a clean tree on main, a "## <version> (YYYY-MM-DD)" heading in
+# CHANGELOG.md,
 # cargo, gh (logged in), and the tools make check needs.
 set -euo pipefail
 
@@ -21,7 +22,7 @@ branch="$(git rev-parse --abbrev-ref HEAD)"
 git fetch -q origin main
 [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] || { echo "main is not in sync with origin" >&2; exit 1; }
 ! git rev-parse -q --verify "refs/tags/v$version" >/dev/null || { echo "tag v$version exists" >&2; exit 1; }
-grep -q "^## $version (" CHANGELOG.md || { echo "CHANGELOG.md has no '## $version (' section" >&2; exit 1; }
+grep -Eq "^## ${version//./\\.} \([0-9]{4}-[0-9]{2}-[0-9]{2}\)$" CHANGELOG.md || { echo "CHANGELOG.md has no '## $version (YYYY-MM-DD)' section" >&2; exit 1; }
 
 # Checks run on the clean tree first; they do not depend on the version.
 make check
@@ -44,6 +45,7 @@ trap - EXIT
 git tag -a "v$version" -m "goat-herdr $version"
 git push -q origin main "v$version"
 
-notes="$(sed -n "/^## $version (/,/^## /p" CHANGELOG.md | sed '1d;$d')"
+# The section's lines, up to the next "## " heading or the end of the file.
+notes="$(awk -v h="## $version (" 'index($0, h) == 1 { on = 1; next } on && /^## / { exit } on' CHANGELOG.md)"
 gh release create "v$version" --title "$version" --notes "$notes"
 echo "released v$version"
